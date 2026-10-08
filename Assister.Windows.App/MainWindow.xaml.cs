@@ -17,8 +17,7 @@ public partial class MainWindow : Window
     private Guid _conversationId;
     private Guid? _activeInteraction;
     private readonly CancellationTokenSource _updateLifetime = new();
-    private CancellationTokenSource? _wakeWordLifetime;
-    private Task _wakeWordTask = Task.CompletedTask;
+    private readonly BackgroundWorkerSession _wakeWordSession = new();
     private CancellationTokenSource? _playbackLifetime;
     private readonly SemaphoreSlim _playbackGate = new(1, 1);
     private Task _playbackTask = Task.CompletedTask;
@@ -54,32 +53,33 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken())) await ConnectAsync();
             else AddWelcome();
         };
-        Closed += (_, _) => { _closed = true; _idleTimer.Stop(); _playbackLifetime?.Cancel(); _voiceLifetime?.Cancel(); _wakeWordLifetime?.Cancel(); _updateLifetime.Cancel(); _connectionLifetime?.Cancel(); _client?.Dispose(); };
+        Closed += (_, _) => { _closed = true; _idleTimer.Stop(); _playbackLifetime?.Cancel(); _voiceLifetime?.Cancel(); _wakeWordSession.Close(); _updateLifetime.Cancel(); _connectionLifetime?.Cancel(); _client?.Dispose(); };
     }
 
     private async Task RestartWakeWordAsync()
     {
         await RefreshIdleWakePhraseAsync();
-        _wakeWordLifetime?.Cancel();
-        await _wakeWordTask;
-        _wakeWordLifetime?.Dispose();
-        if (_closed) return;
-        WakeWordStatus.Text = "Wake word off";
-        if (!_settings.WakeWordEnabled || _voiceActive || _playingInteraction is not null || _tonePlaying) return;
-        var lifetime = _wakeWordLifetime = new CancellationTokenSource();
-        var detector = new WakeWordDetector();
-        void OnUi(Action action) => Dispatcher.BeginInvoke(() =>
+        await _wakeWordSession.ReplaceAsync(token =>
         {
-            if (!_closed && !lifetime.IsCancellationRequested) action();
+            if (_closed) return Task.CompletedTask;
+            WakeWordStatus.Text = "Wake word off";
+            if (!_settings.WakeWordEnabled || _voiceActive || _playingInteraction is not null || _tonePlaying || _activeInteraction is not null)
+                return Task.CompletedTask;
+            var detector = new WakeWordDetector();
+            void OnUi(Action action) => Dispatcher.BeginInvoke(() =>
+            {
+                // A token remains safe to inspect after its owning source is disposed.
+                if (!_closed && !token.IsCancellationRequested) action();
+            });
+            detector.StatusChanged += status => OnUi(() => WakeWordStatus.Text = status);
+            detector.Detected += keyword => OnUi(() =>
+            {
+                WakeConversation();
+                _ = BeginVoiceAsync();
+            });
+            WakeWordStatus.Text = "Starting wake word…";
+            return detector.RunAsync(_settings.WakeWordModelDirectory, _settings.WakeWordKeywordsFile, token);
         });
-        detector.StatusChanged += status => OnUi(() => WakeWordStatus.Text = status);
-        detector.Detected += keyword => OnUi(() =>
-        {
-            WakeConversation();
-            _ = BeginVoiceAsync();
-        });
-        WakeWordStatus.Text = "Starting wake word…";
-        _wakeWordTask = detector.RunAsync(_settings.WakeWordModelDirectory, _settings.WakeWordKeywordsFile, lifetime.Token);
     }
 
     private async Task UpdateLoopAsync()
@@ -123,8 +123,7 @@ public partial class MainWindow : Window
         WakeWordStatus.Text = "Recording command · wake word paused";
         try
         {
-            _wakeWordLifetime?.Cancel();
-            await _wakeWordTask;
+            await _wakeWordSession.StopAsync();
             await StopPlaybackAsync();
             token.ThrowIfCancellationRequested();
             if (ConversationIdlePolicy.ShouldStartNew(_messages.Count > 0, _settings.LastConversationActivityUtc,
@@ -502,6 +501,10 @@ public partial class MainWindow : Window
                 }
                 RenderMessages();
             }
+            // Resume after terminal events even when response autoplay is muted or speech failed.
+            await _toneTask;
+            if (!_closed && !cancellationToken.IsCancellationRequested && ReferenceEquals(client, _client))
+                await RestartWakeWordAsync();
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) { Dispatcher.Invoke(() => SetConnection("Reconnecting", "#E4A95C")); _ = exception; }
@@ -555,8 +558,7 @@ public partial class MainWindow : Window
                 !_settings.ProcessingSoundsEnabled || (!deferred && cue.ExpiresAt <= DateTimeOffset.UtcNow)) return;
             lifetime.CancelAfter(TimeSpan.FromSeconds(5));
             _tonePlaying = true;
-            _wakeWordLifetime?.Cancel();
-            await _wakeWordTask;
+            await _wakeWordSession.StopAsync();
             var bytes = await client.DownloadToneAsync(cue.Name, lifetime.Token);
             if (!deferred && cue.ExpiresAt <= DateTimeOffset.UtcNow) return;
             await ResponseAudio.PlayAsync(bytes, () => Task.CompletedTask, lifetime.Token);
@@ -571,7 +573,7 @@ public partial class MainWindow : Window
         finally
         {
             if (acquired) { _tonePlaying = false; _audioOutputGate.Release(); }
-            if (!_closed && !connectionToken.IsCancellationRequested && _playingInteraction is null && !_voiceActive)
+            if (!_closed && !connectionToken.IsCancellationRequested && _playingInteraction is null && !_voiceActive && _activeInteraction is null)
             {
                 try { await RestartWakeWordAsync(); }
                 catch (Exception) { }
@@ -616,8 +618,7 @@ public partial class MainWindow : Window
             acquired = true;
             item.AudioError = "";
             RenderMessages();
-            _wakeWordLifetime?.Cancel();
-            await _wakeWordTask;
+            await _wakeWordSession.StopAsync();
             var bytes = await client.DownloadAudioAsync(item.Id, lifetime.Token);
             using (ResponseAudio.Open(bytes)) { }
             await ResponseAudio.PlayAsync(bytes, async () =>
