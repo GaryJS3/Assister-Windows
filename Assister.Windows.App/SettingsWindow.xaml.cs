@@ -19,6 +19,8 @@ public partial class SettingsWindow : Window
         EndpointInput.Text = settings.Endpoint;
         WakeWordEnabledInput.IsChecked = settings.WakeWordEnabled;
         WakeWordConversationTimeoutInput.Text = settings.WakeWordConversationTimeoutSeconds.ToString();
+        AutoplayResponsesInput.IsChecked = settings.AutoplayResponses;
+        IdleDisplayTimeoutInput.Text = settings.IdleDisplayTimeoutSeconds.ToString();
         WakeWordModelInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordModelDirectory) ? WakeWordSetup.ModelDirectory : settings.WakeWordModelDirectory;
         WakeWordKeywordsInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordKeywordsFile) ? WakeWordSetup.KeywordsFile : settings.WakeWordKeywordsFile;
         WakeWordSetupStatus.Text = WakeWordSetup.IsInstalled() ? "Engine installed · ready to enable" : "One-time download from sherpa-onnx. No scripts or file selection needed.";
@@ -88,6 +90,8 @@ public partial class SettingsWindow : Window
             var wakeWordEnabled = WakeWordEnabledInput.IsChecked == true;
             if (!int.TryParse(WakeWordConversationTimeoutInput.Text.Trim(), out var conversationTimeout) || conversationTimeout is < 0 or > 86400)
                 throw new ArgumentException("Enter an idle timeout from 0 to 86400 seconds (0 keeps the conversation).");
+            if (!int.TryParse(IdleDisplayTimeoutInput.Text.Trim(), out var displayTimeout) || displayTimeout is < 0 or > 86400)
+                throw new ArgumentException("Enter a clock timeout from 0 to 86400 seconds (0 disables the idle clock).");
             if (wakeWordEnabled)
             {
                 if (WakeWordModelInput.Text == WakeWordSetup.ModelDirectory && !WakeWordSetup.IsInstalled())
@@ -107,6 +111,8 @@ public partial class SettingsWindow : Window
             _settings.Endpoint = endpoint;
             _settings.WakeWordEnabled = wakeWordEnabled;
             _settings.WakeWordConversationTimeoutSeconds = conversationTimeout;
+            _settings.AutoplayResponses = AutoplayResponsesInput.IsChecked == true;
+            _settings.IdleDisplayTimeoutSeconds = displayTimeout;
             _settings.WakeWordModelDirectory = WakeWordModelInput.Text.Trim();
             _settings.WakeWordKeywordsFile = WakeWordKeywordsInput.Text.Trim();
             _settings.Save();

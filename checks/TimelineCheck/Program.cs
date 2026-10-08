@@ -43,7 +43,6 @@ internal static class Program
         var messages = (StackPanel)window.FindName("MessagesPanel");
         messages.Children.Add(new ExecutionTimelineView(timeline, true, true, _ => { }));
         ((TextBlock)window.FindName("ConversationTitle")).Text = "Living room lights";
-        ((TextBlock)window.FindName("ProtocolLabel")).Text = "Connected · Ready for your next request";
         ((TextBox)window.FindName("MessageInput")).Text = "Ask Assister…";
         var root = (Grid)window.Content;
         Check(root.ColumnDefinitions.Count == 2, "one sidebar plus conversation");

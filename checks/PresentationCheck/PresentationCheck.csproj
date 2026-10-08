@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Assister.Windows.App/Assister.Windows.App.csproj" />
+    <Compile Include="../../Assister.Windows.App/Services/IdleDisplayPolicy.cs" Link="IdleDisplayPolicy.cs" />
+    <Compile Include="../../Assister.Windows.App/Services/FullscreenController.cs" Link="FullscreenController.cs" />
+  </ItemGroup>
+</Project>

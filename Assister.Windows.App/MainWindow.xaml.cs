@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializePresentation();
         Loaded += async (_, _) =>
         {
             _ = UpdateLoopAsync();
@@ -48,11 +49,12 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken())) await ConnectAsync();
             else AddWelcome();
         };
-        Closed += (_, _) => { _closed = true; _playbackLifetime?.Cancel(); _voiceLifetime?.Cancel(); _wakeWordLifetime?.Cancel(); _updateLifetime.Cancel(); _connectionLifetime?.Cancel(); _client?.Dispose(); };
+        Closed += (_, _) => { _closed = true; _idleTimer.Stop(); _playbackLifetime?.Cancel(); _voiceLifetime?.Cancel(); _wakeWordLifetime?.Cancel(); _updateLifetime.Cancel(); _connectionLifetime?.Cancel(); _client?.Dispose(); };
     }
 
     private async Task RestartWakeWordAsync()
     {
+        await RefreshIdleWakePhraseAsync();
         _wakeWordLifetime?.Cancel();
         await _wakeWordTask;
         _wakeWordLifetime?.Dispose();
@@ -68,6 +70,7 @@ public partial class MainWindow : Window
         detector.StatusChanged += status => OnUi(() => WakeWordStatus.Text = status);
         detector.Detected += keyword => OnUi(() =>
         {
+            WakeConversation();
             _ = BeginVoiceAsync();
         });
         WakeWordStatus.Text = "Starting wake word…";
@@ -92,6 +95,7 @@ public partial class MainWindow : Window
 
     private async Task BeginVoiceAsync()
     {
+        WakeConversation();
         if (_voiceActive || _activeInteraction is not null || OwnedWindows.Count > 0) return;
         if (_client is null || !_supportsVoice) { ShowError("Connect to a server supporting audio input before recording a voice command."); return; }
         _voiceActive = true;
@@ -255,13 +259,16 @@ public partial class MainWindow : Window
 
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
+        WakeConversation();
         if (_voiceActive) { ShowError("Send or cancel the voice recording before opening Settings."); return; }
         var dialog = new SettingsWindow(_settings, CheckForUpdatesAsync) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
+            if (!_settings.AutoplayResponses) await StopPlaybackAsync();
             await RestartWakeWordAsync();
             await ConnectAsync();
         }
+        WakeConversation();
     }
 
     private async Task ConnectAsync()
@@ -278,8 +285,6 @@ public partial class MainWindow : Window
             candidate = new AssisterClient(_settings.Endpoint, CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken() ?? "");
             using var protocol = await candidate.ConnectAsync(token);
             _supportsVoice = protocol.RootElement.TryGetProperty("features", out var voiceFeatures) && voiceFeatures.EnumerateArray().Any(feature => feature.GetString() == "audio.input");
-            var features = protocol.RootElement.TryGetProperty("features", out var featureArray)
-                ? string.Join(" · ", featureArray.EnumerateArray().Select(item => item.GetString())) : "Protocol v1";
             var client = candidate;
             _client = client;
             candidate = null;
@@ -321,7 +326,7 @@ public partial class MainWindow : Window
             _ = RestoreAudioAsync(client, token);
             RenderMessages();
             ConversationTitle.Text = history.LastOrDefault()?.Input is { Length: > 0 } title ? title[..Math.Min(48, title.Length)] : "New conversation";
-            ProtocolLabel.Text = features;
+            NoticeLabel.Visibility = Visibility.Collapsed;
             EndpointLabel.Text = _settings.Endpoint;
             SetConnection("Connected", "#74D6B2");
             if (history.Count == 0) AddWelcome();
@@ -332,7 +337,7 @@ public partial class MainWindow : Window
             _client?.Dispose();
             _client = null;
             SetConnection("Connection failed", "#E27C7C");
-            ProtocolLabel.Text = exception.Message;
+            ShowError(exception.Message);
             AddWelcome("Could not connect. Open Settings to check the server and token.");
         }
         finally { candidate?.Dispose(); }
@@ -368,6 +373,7 @@ public partial class MainWindow : Window
 
     private void MarkConversationActivity()
     {
+        WakeConversation();
         _settings.LastConversationActivityUtc = DateTimeOffset.UtcNow;
         try { _settings.Save(); }
         catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException)
@@ -438,17 +444,17 @@ public partial class MainWindow : Window
                             break;
                         case "response.delta": item.Response += ReadText(data, "text"); item.Status = "responding"; break;
                         case "response.completed": item.Response = ReadText(data, "text"); break;
-                        case "tts.started": item.AudioStatus = "Preparing speech…"; break;
+                        case "tts.started": item.AudioError = ""; break;
                         case "tts.audio":
                             item.HasAudio = true;
-                            item.AudioStatus = "Audio ready";
-                            if (!item.AutoPlayed && item.AutoPlay && AutoplayResponses.IsChecked == true)
+                            item.AudioError = "";
+                            if (!item.AutoPlayed && item.AutoPlay && _settings.AutoplayResponses)
                             {
                                 item.AutoPlayed = true;
                                 _ = StartPlaybackAsync(item);
                             }
                             break;
-                        case "tts.failed": item.AudioStatus = "Speech unavailable"; break;
+                        case "tts.failed": item.AudioError = "Speech unavailable"; break;
                         case "interaction.cancelled":
                             if (_playingInteraction == item.Id) _playbackLifetime?.Cancel();
                             item.Status = "cancelled"; break;
@@ -496,8 +502,6 @@ public partial class MainWindow : Window
         await _playbackTask;
     }
 
-    private async void AutoplayResponses_Unchecked(object sender, RoutedEventArgs e) => await StopPlaybackAsync();
-
     private async Task StartPlaybackAsync(ChatItem item)
     {
         await _playbackGate.WaitAsync();
@@ -521,7 +525,7 @@ public partial class MainWindow : Window
         var started = false;
         try
         {
-            item.AudioStatus = "Loading audio…";
+            item.AudioError = "";
             RenderMessages();
             _wakeWordLifetime?.Cancel();
             await _wakeWordTask;
@@ -530,16 +534,14 @@ public partial class MainWindow : Window
             await ResponseAudio.PlayAsync(bytes, async () =>
             {
                 started = true;
-                item.AudioStatus = "Playing…";
                 RenderMessages();
                 await client.ReportPlaybackAsync(item.Id, playbackId, "started", lifetime.Token);
             }, lifetime.Token);
             finalState = "completed";
-            item.AudioStatus = "Audio finished";
             if (_messages.Contains(item)) MarkConversationActivity();
         }
-        catch (OperationCanceledException) { finalState = started ? "stopped" : "failed"; item.AudioStatus = "Audio stopped"; }
-        catch (Exception exception) { item.AudioStatus = "Could not play audio: " + exception.Message; }
+        catch (OperationCanceledException) { finalState = started ? "stopped" : "failed"; }
+        catch (Exception exception) { item.AudioError = "Could not play audio: " + exception.Message; }
         finally
         {
             try
@@ -548,7 +550,7 @@ public partial class MainWindow : Window
                 using var reportTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 await client.ReportPlaybackAsync(item.Id, playbackId, finalState, reportTimeout.Token);
             }
-            catch (Exception) { item.AudioStatus += " · Playback report unavailable"; }
+            catch (Exception) { item.AudioError = item.AudioError.Length == 0 ? "Playback report unavailable" : item.AudioError + " · Playback report unavailable"; }
             _playingInteraction = null;
             _playbackLifetime = null;
             lifetime.Dispose();
@@ -575,7 +577,7 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            var followLatest = ConversationScroll.ScrollableHeight - ConversationScroll.VerticalOffset < 60;
+            var followLatest = !ConversationScroll.IsUserScrolling && ConversationScroll.ScrollableHeight - ConversationScroll.VerticalOffset < 60;
             MessagesPanel.Children.Clear();
             foreach (var item in _messages)
             {
@@ -589,8 +591,9 @@ public partial class MainWindow : Window
                     button.Click += async (_, _) => { if (_playingInteraction == item.Id) await StopPlaybackAsync(); else await StartPlaybackAsync(item); };
                     MessagesPanel.Children.Add(button);
                 }
-                if (item.AudioStatus.Length > 0) MessagesPanel.Children.Add(new TextBlock { Text = item.AudioStatus, Foreground = (Brush)FindResource("Muted"), Margin = new Thickness(15, 0, 0, 12) });
-                else if (item.Status is not ("completed" or "failed" or "cancelled")) AddBubble("ASSISTER", "Working on it…", user: false, muted: true);
+                if (item.AudioError.Length > 0)
+                    MessagesPanel.Children.Add(new TextBlock { Text = item.AudioError, Foreground = new SolidColorBrush(Color.FromRgb(240, 165, 165)), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(15, 0, 0, 12) });
+                else if (!item.HasAudio && item.Response.Length == 0 && item.Status is not ("completed" or "failed" or "cancelled")) AddBubble("ASSISTER", "Working on it…", user: false, muted: true);
                 if (!string.IsNullOrWhiteSpace(item.Error)) AddBubble("SERVER", item.Error, user: false, muted: true);
             }
             if (followLatest) ConversationScroll.ScrollToEnd();
@@ -623,8 +626,9 @@ public partial class MainWindow : Window
 
     private void ShowError(string message)
     {
-        ProtocolLabel.Text = message;
-        ProtocolLabel.Foreground = new SolidColorBrush(Color.FromRgb(240, 165, 165));
+        WakeConversation();
+        NoticeLabel.Text = message;
+        NoticeLabel.Visibility = Visibility.Visible;
     }
 
     private void SetConnection(string text, string color)
@@ -645,7 +649,7 @@ public partial class MainWindow : Window
         public bool HasAudio { get; set; }
         public bool AutoPlay { get; set; } = true;
         public bool AutoPlayed { get; set; }
-        public string AudioStatus { get; set; } = "";
+        public string AudioError { get; set; } = "";
         public string? Error { get; set; }
     }
 }

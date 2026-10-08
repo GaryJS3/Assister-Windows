@@ -22,12 +22,23 @@ internal static class Program
             var window = (SettingsWindow)constructor.Invoke([settings, check]);
             var timeout = (TextBox)window.FindName("WakeWordConversationTimeoutInput");
             if (timeout.Text != "60") throw new Exception("Wake conversation timeout must default to 60 seconds.");
+            var clockTimeout = (TextBox)window.FindName("IdleDisplayTimeoutInput");
+            if (clockTimeout.Text != "180" || ((CheckBox)window.FindName("AutoplayResponsesInput")).IsChecked != true)
+                throw new Exception("Clock and autoplay defaults are incorrect.");
             foreach (var invalid in new[] { "-1", "86401", "abc", "1.5" })
             {
                 timeout.Text = invalid;
                 ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 if (!((TextBlock)window.FindName("ErrorLabel")).Text.Contains("idle timeout"))
                     throw new Exception("Invalid conversation timeout must be rejected before saving credentials.");
+            }
+            timeout.Text = "60";
+            foreach (var invalid in new[] { "-1", "86401", "abc", "1.5" })
+            {
+                clockTimeout.Text = invalid;
+                ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (!((TextBlock)window.FindName("ErrorLabel")).Text.Contains("clock timeout"))
+                    throw new Exception("Invalid clock timeout must be rejected before saving credentials.");
             }
             var button = (Button)window.FindName("CheckForUpdatesButton");
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -36,6 +47,6 @@ internal static class Program
                 throw new Exception("Manual update button failed to present its result or restore retry.");
             window.Close();
         }
-        Console.WriteLine("PASS: Settings loads with 60-second wake timeout, rejects invalid timeouts; manual update feedback and retry.");
+        Console.WriteLine("PASS: Settings defaults (wake 60s, clock 180s, autoplay on), invalid wake/clock timeouts rejected; manual update feedback and retry.");
     }
 }

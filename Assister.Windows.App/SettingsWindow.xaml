@@ -1,6 +1,7 @@
 <Window x:Class="Assister.Windows.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Assister.Windows.App.Controls"
         Title="Assister settings" Width="560" Height="740" ResizeMode="CanResize" MinWidth="500" MinHeight="620"
         WindowStartupLocation="CenterOwner" Background="#101720" Foreground="#E7EDF5">
     <Grid Margin="28">
@@ -18,8 +19,13 @@
             <PasswordBox x:Name="TokenInput" Height="40" Padding="12,9" Background="#111923" Foreground="#E7EDF5" BorderBrush="#2A3849" BorderThickness="1"/>
             <TextBlock Text="The token is stored in Windows Credential Manager." Foreground="#718197" FontSize="11" Margin="0,7,0,0"/>
         </StackPanel>
-        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,16,0,16">
+        <controls:DragScrollViewer Grid.Row="3" Margin="0,16,0,16">
         <StackPanel>
+            <TextBlock Text="Conversation display" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"/>
+            <CheckBox x:Name="AutoplayResponsesInput" Content="Automatically play new responses" Foreground="#E7EDF5" MinHeight="44" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
+            <TextBlock Text="Show the idle clock after this many seconds" Foreground="#E7EDF5" TextWrapping="Wrap"/>
+            <TextBox x:Name="IdleDisplayTimeoutInput" MinHeight="40" VerticalContentAlignment="Center" Margin="0,6,0,6"/>
+            <TextBlock Text="Default: 180 seconds (3 minutes). Use 0 to disable. Touch, typing or a wake word brings the conversation back. Active requests, audio and drafts keep it visible." Foreground="#8B9AAF" TextWrapping="Wrap" Margin="0,0,0,18"/>
             <TextBlock Text="App updates" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8"/>
             <TextBlock x:Name="UpdateVersionLabel" Foreground="#8B9AAF" Margin="0,0,0,8"/>
             <Button x:Name="CheckForUpdatesButton" Content="Check for updates" HorizontalAlignment="Left" Click="CheckForUpdates_Click"/>
@@ -46,7 +52,7 @@
             <TextBlock Text="Wake detection stays local. Commands send automatically after one second of silence. Send finishes now; Cancel discards before submission. Command audio is uploaded to your server for transcription." TextWrapping="Wrap" Foreground="#8B9AAF" FontSize="11"/>
             <TextBlock x:Name="ErrorLabel" Foreground="#F0A5A5" TextWrapping="Wrap" Margin="0,12,0,0"/>
         </StackPanel>
-        </ScrollViewer>
+        </controls:DragScrollViewer>
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
             <Button Content="Cancel" IsCancel="True" Margin="0,0,9,0"/>
             <Button x:Name="SaveSettingsButton" Content="Save and connect" IsDefault="True" Background="#255548" BorderBrush="#357362" Click="Save_Click"/>

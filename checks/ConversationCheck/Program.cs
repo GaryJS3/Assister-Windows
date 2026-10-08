@@ -12,6 +12,11 @@ Require(!Reset(-5), "Future activity must not reset conversation.");
 Require(!ConversationIdlePolicy.ShouldStartNew(true, null, now, 60), "Unknown activity must not discard context.");
 var settings = JsonSerializer.Deserialize<AppSettings>("{\"ConversationId\":\"00000000-0000-0000-0000-000000000001\"}")!;
 Require(settings.WakeWordConversationTimeoutSeconds == 60, "Existing settings must adopt the default.");
+Require(settings.IdleDisplayTimeoutSeconds == 180 && settings.AutoplayResponses, "Existing settings must adopt the clock/autoplay defaults.");
+settings.IdleDisplayTimeoutSeconds = 300;
+settings.AutoplayResponses = false;
+var displaySettings = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
+Require(displaySettings.IdleDisplayTimeoutSeconds == 300 && !displaySettings.AutoplayResponses, "Display preferences must persist.");
 foreach (var timeout in new[] { 0, 60, 120, 86400 })
 {
     settings.WakeWordConversationTimeoutSeconds = timeout;
