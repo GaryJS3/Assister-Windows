@@ -120,6 +120,23 @@ internal sealed class AssisterClient : IDisposable
         return events?.RootElement.ValueKind == JsonValueKind.Array && events.RootElement.EnumerateArray().Any(item => item.TryGetProperty("type", out var type) && type.GetString() == "tts.audio");
     }
 
+    public async Task RestoreTimelineAsync(Guid interactionId, Action<JsonElement> applyEvent, CancellationToken cancellationToken)
+    {
+        long cursor = 0;
+        while (true)
+        {
+            using var events = await _http.GetFromJsonAsync<JsonDocument>($"api/client/interactions/{interactionId}/events?afterSequence={cursor}", Json, cancellationToken);
+            if (events?.RootElement.ValueKind != JsonValueKind.Array) return;
+            var previous = cursor;
+            foreach (var item in events.RootElement.EnumerateArray())
+            {
+                applyEvent(item);
+                if (item.TryGetProperty("sequence", out var sequence)) cursor = Math.Max(cursor, sequence.GetInt64());
+            }
+            if (cursor == previous || events.RootElement.GetArrayLength() < 256) return;
+        }
+    }
+
     public async Task<Guid> UploadVoiceAsync(byte[] pcm, CancellationToken cancellationToken)
     {
         if (pcm.Length is <= 0 or > 960000 || pcm.Length % 2 != 0) throw new ArgumentException("Recording must be 16 kHz mono PCM and no longer than 30 seconds.");

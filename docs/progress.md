@@ -13,6 +13,8 @@ This tracker separates code that exists from platform/server verification. Andro
 
 ## Implemented
 
+- [x] Conversation-first layout with one 240-DIP navigation sidebar, 22-DIP conversation/composer text and larger supporting controls. Android-style inline execution timelines show nested steps, relative timing bars and live tenths-of-a-second durations; completed timelines collapse and can be reopened. Server timestamps anchor a monotonic live clock; terminal times freeze and supplied durations take precedence. Historical terminal traces restore from paginated events. Physical distance/touch acceptance remains pending.
+
 - [x] Wake word activations start a new conversation after more than 60 seconds of inactivity by default. Settings accepts 0–86400 idle seconds; 0 always continues the conversation. Empty conversations are reused. Activity is saved after successful submissions, terminal responses, and completed playback; restored history supplies the latest message timestamp when needed.
 - [x] Response audio: new `tts.audio` events automatically play authenticated server WAVs, with a session autoplay toggle and touch-sized Play/Stop controls. Historical speech controls restore from events without autoplay. Downloads and PCM validation are bounded; each attempt has a fresh playback ID and reports actual started/completed/stopped/failed states. Wake detection pauses during playback and resumes afterward; new input, connection/conversation changes, and shutdown stop playback.
 - [x] .NET 10 WPF solution and dark conversation/activity shell.
@@ -39,6 +41,8 @@ This tracker separates code that exists from platform/server verification. Andro
 - [ ] Add automated .NET tests for reducer, protocol transport, recovery, settings, and UI behavior.
 
 ## Verification Evidence
+
+- October 7, 2026 UI cleanup: `dotnet build .\Assister.Windows.sln` and `dotnet run --project checks\TimelineCheck` passed (existing IL3000 updater warning). TimelineCheck covers server-relative time, authoritative durations, preserved labels/parents, replay duplicates, terminal freeze, unknown/negative times, single-sidebar layout, font sizes, and WPF renders at 1280x820 and 900x1000. Rendered sample layouts were visually inspected; screenshots are under ignored `artifacts/ui`. ConversationCheck, SettingsCheck, VoiceCheck and PlaybackCheck passed. Android `ActivityTimeline.kt`/`Interaction.kt` supplied the timeline reference; the current canonical protocol was read. No live-server timeline, physical Tab-Dev touch/scaling/orientation/distance checks, deployment or release publication ran.
 
 - October 7, 2026 wake conversation timeout: `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\ConversationCheck`, `dotnet run --project checks\SettingsCheck`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\PlaybackCheck` passed. ConversationCheck covers the 60-second boundary, disabled/custom timeout, empty conversations, future/missing timestamps, existing settings defaults, and JSON persistence of timeout/activity. SettingsCheck verifies the displayed default and rejection of invalid timeout values before credential writes. Existing updater IL3000 warning remains. Physical wake activation, new-conversation creation against a live server, and tablet settings/touch acceptance were not run; no release was published. For history that predates activity tracking, the latest server message creation time is the fallback.
 

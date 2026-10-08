@@ -361,7 +361,7 @@ public partial class MainWindow : Window
         _messages.Clear();
         _activeInteraction = null;
         CancelButton.Visibility = Visibility.Collapsed;
-        ActivityPanel.Items.Clear();
+
         ConversationTitle.Text = "New conversation";
         AddWelcome();
     }
@@ -426,6 +426,7 @@ public partial class MainWindow : Window
                     var type = root.GetProperty("type").GetString() ?? "";
                     var data = root.TryGetProperty("data", out var payload) ? payload : default;
                     if (!_messages.Contains(item)) continue;
+                    item.Timeline.Apply(root);
                     switch (type)
                     {
                         case "stt.started": item.Input = "Transcribing voice…"; item.Status = "transcribing"; break;
@@ -453,13 +454,7 @@ public partial class MainWindow : Window
                         case "interaction.completed": item.Status = "completed"; break;
                         case "interaction.failed": item.Status = "failed"; item.Error = ReadText(data, "message"); break;
 
-                        case "step.started": case "step.updated": case "step.completed": case "step.failed":
-                            var label = ReadText(data, "label");
-                            if (label.Length == 0) label = ReadText(data, "kind");
-                            if (label.Length == 0) label = type;
-                            var stepId = ReadText(data, "stepId");
-                            if (stepId.Length > 0) UpdateActivity(stepId, label, type);
-                            break;
+
                     }
                 }
                 if (item.Status is "completed" or "failed" or "cancelled")
@@ -483,6 +478,8 @@ public partial class MainWindow : Window
         {
             try
             {
+                if (item.Status is "completed" or "failed" or "cancelled")
+                    await client.RestoreTimelineAsync(item.Id, item.Timeline.Apply, token);
                 if (await client.HasAudioAsync(item.Id, token) && _messages.Contains(item)) item.HasAudio = true;
             }
             catch (OperationCanceledException) { return; }
@@ -572,33 +569,18 @@ public partial class MainWindow : Window
 
     private static string ReadText(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
 
-    private void UpdateActivity(string id, string label, string status)
-    {
-        Dispatcher.Invoke(() =>
-        {
-            ActivityHeading.Text = "Execution in progress";
-            var row = ActivityPanel.Items.Cast<Border>().FirstOrDefault(item => Equals(item.Tag, id));
-            if (row is null)
-            {
-                var text = new TextBlock { Text = label, Foreground = Brushes.White, FontSize = 12, TextWrapping = TextWrapping.Wrap };
-                var state = new TextBlock { Text = "RUNNING", Foreground = (Brush)FindResource("Accent"), FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 5, 0, 0) };
-                row = new Border { Tag = id, Background = (Brush)FindResource("PanelRaised"), CornerRadius = new CornerRadius(9), Padding = new Thickness(12), Margin = new Thickness(0, 0, 0, 8), Child = new StackPanel { Children = { text, state } } };
-                ActivityPanel.Items.Add(row);
-            }
-            var statusLabel = ((StackPanel)row.Child).Children.OfType<TextBlock>().Last();
-            statusLabel.Text = status switch { "step.completed" => "COMPLETED", "step.failed" => "FAILED", _ => "RUNNING" };
-        });
-    }
-
     private void RenderMessages()
     {
         Dispatcher.Invoke(() =>
         {
+            var followLatest = ConversationScroll.ScrollableHeight - ConversationScroll.VerticalOffset < 60;
             MessagesPanel.Children.Clear();
             foreach (var item in _messages)
             {
                 AddBubble("YOU", item.Input, user: true);
                 if (item.Response.Length > 0) AddBubble("ASSISTER", item.Response, user: false);
+                if (item.Timeline.Steps.Count > 0)
+                    MessagesPanel.Children.Add(new Controls.ExecutionTimelineView(item.Timeline, item.Status is "completed" or "failed" or "cancelled", item.TraceExpanded, expanded => item.TraceExpanded = expanded));
                 if (item.HasAudio)
                 {
                     var button = new Button { Content = _playingInteraction == item.Id ? "Stop audio" : "Play response", MinHeight = 44, MinWidth = 140, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(15, 0, 0, 12) };
@@ -609,20 +591,20 @@ public partial class MainWindow : Window
                 else if (item.Status is not ("completed" or "failed" or "cancelled")) AddBubble("ASSISTER", "Working on it…", user: false, muted: true);
                 if (!string.IsNullOrWhiteSpace(item.Error)) AddBubble("SERVER", item.Error, user: false, muted: true);
             }
-            ConversationScroll.ScrollToEnd();
+            if (followLatest) ConversationScroll.ScrollToEnd();
         });
     }
 
     private void AddBubble(string label, string text, bool user, bool muted = false)
     {
-        var stack = new StackPanel { MaxWidth = 700, HorizontalAlignment = user ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 20) };
-        stack.Children.Add(new TextBlock { Text = label, Foreground = (Brush)FindResource("Muted"), FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(5, 0, 5, 6) });
+        var stack = new StackPanel { MaxWidth = 1000, HorizontalAlignment = user ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 20) };
+        stack.Children.Add(new TextBlock { Text = label, Foreground = (Brush)FindResource("Muted"), FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(5, 0, 5, 6) });
         stack.Children.Add(new Border
         {
             Background = user ? (Brush)FindResource("PanelRaised") : Brushes.Transparent,
             BorderBrush = user ? (Brush)FindResource("PanelRaised") : Brushes.Transparent,
             BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(15, 11, 15, 11),
-            Child = new TextBlock { Text = text, Foreground = muted ? (Brush)FindResource("Muted") : Brushes.White, FontSize = 14, TextWrapping = TextWrapping.Wrap, LineHeight = 23 }
+            Child = new TextBlock { Text = text, Foreground = muted ? (Brush)FindResource("Muted") : Brushes.White, FontSize = 22, TextWrapping = TextWrapping.Wrap, LineHeight = 33 }
         });
         MessagesPanel.Children.Add(stack);
     }
@@ -633,7 +615,7 @@ public partial class MainWindow : Window
         MessagesPanel.Children.Clear();
         var welcome = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 100, 0, 70), HorizontalAlignment = HorizontalAlignment.Center, MaxWidth = 510 };
         welcome.Children.Add(new TextBlock { Text = "A clearer view of what\nAssister is doing.", FontSize = 34, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center, LineHeight = 42 });
-        welcome.Children.Add(new TextBlock { Text = detail ?? "Connect to your server, ask a question, and follow the answer and execution as they happen.", Foreground = (Brush)FindResource("Muted"), FontSize = 14, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(20, 17, 20, 0), LineHeight = 23 });
+        welcome.Children.Add(new TextBlock { Text = detail ?? "Connect to your server, ask a question, and follow the answer and execution as they happen.", Foreground = (Brush)FindResource("Muted"), FontSize = 20, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(20, 17, 20, 0), LineHeight = 33 });
         MessagesPanel.Children.Add(welcome);
     }
 
@@ -651,6 +633,8 @@ public partial class MainWindow : Window
 
     private sealed class ChatItem(Guid id, string input, string response, string status, long sequence)
     {
+        public ExecutionTimeline Timeline { get; } = new();
+        public bool TraceExpanded { get; set; }
         public Guid Id { get; } = id;
         public string Input { get; set; } = input;
         public string Response { get; set; } = response;
