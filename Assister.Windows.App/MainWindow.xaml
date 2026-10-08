@@ -67,9 +67,19 @@
                 <StackPanel MaxWidth="1100" HorizontalAlignment="Stretch">
                     <Border x:Name="TypedComposer" Background="#121A24" BorderBrush="#2A3849" BorderThickness="1" CornerRadius="13" Padding="12">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBox x:Name="MessageInput" Grid.Column="0" BorderThickness="0" Background="Transparent" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="54" MaxHeight="150" VerticalScrollBarVisibility="Auto" FontSize="22" VerticalContentAlignment="Center" KeyDown="MessageInput_KeyDown"/>
-                            <Button x:Name="SendButton" Grid.Column="1" Content="Send  ↑" Background="#255548" BorderBrush="#357362" Foreground="#DFFAF0" VerticalAlignment="Bottom" Margin="10,0,0,0" Click="Send_Click"/>
+                            <Button x:Name="MicrophoneButton" Grid.Column="1" MinWidth="56" MinHeight="56" VerticalAlignment="Bottom" Margin="10,0,0,0"
+                                    ToolTip="Record a voice command" AutomationProperties.Name="Record a voice command" Click="Microphone_Click">
+                                <Viewbox Width="24" Height="28">
+                                    <Canvas Width="24" Height="28">
+                                        <Path Data="M 8,5 C 8,0 16,0 16,5 L 16,13 C 16,18 8,18 8,13 Z" Fill="#DFFAF0"/>
+                                        <Path Data="M 4,12 L 4,14 C 4,24 20,24 20,14 L 20,12 M 12,22 L 12,27 M 7,27 L 17,27"
+                                              Stroke="#DFFAF0" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button x:Name="SendButton" Grid.Column="2" Content="Send  ↑" Background="#255548" BorderBrush="#357362" Foreground="#DFFAF0" VerticalAlignment="Bottom" Margin="10,0,0,0" Click="Send_Click"/>
                         </Grid>
                     </Border>
                     <Border x:Name="VoiceComposer" Visibility="Collapsed" Background="#172B28" BorderBrush="#357362" BorderThickness="1" CornerRadius="13" Padding="20">

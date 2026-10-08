@@ -378,6 +378,8 @@ public partial class MainWindow : Window
 
     private async void Send_Click(object sender, RoutedEventArgs e) => await SendMessageAsync();
 
+    private async void Microphone_Click(object sender, RoutedEventArgs e) => await BeginVoiceAsync();
+
     private async void MessageInput_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift)
