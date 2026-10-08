@@ -92,27 +92,35 @@ internal static class AutoUpdater
         if (Process.Start(info) is null) throw new IOException("Cannot start update helper.");
     }
 
-    internal static bool ApplyUpdate(string[] args)
+    internal static bool IsUpdateHelper(string[] args) =>
+        args.Length == 3 && args[0] == "--apply-update" && int.TryParse(args[1], out _);
+
+    internal static bool ApplyUpdate(string[] args, IProgress<string>? progress = null)
     {
         if (args.Length != 3 || args[0] != "--apply-update" || !int.TryParse(args[1], out var pid)) return false;
         var backup = InstalledPath + ".previous";
         var replaced = false;
         try
         {
+            progress?.Report("Waiting for Assister to close…");
             try { using var parent = Process.GetProcessById(pid); if (!parent.WaitForExit(60000)) throw new IOException("App did not exit for update."); }
             catch (ArgumentException) { }
             var staged = args[2];
             if (!Path.GetFullPath(staged).StartsWith(Path.Combine(Root, "Updates") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("Invalid update staging location.");
+            progress?.Report("Installing the verified update…");
             File.Replace(staged, InstalledPath, backup, true);
             replaced = true;
+            progress?.Report("Restarting Assister…");
             Launch(InstalledPath);
             Log("Update installed and restart requested.");
         }
         catch (Exception exception)
         {
             Log($"Update installation failed: {exception.GetType().Name}: {exception.Message}");
+            progress?.Report("Restoring Assister after an update error…");
             if (replaced && File.Exists(backup)) File.Copy(backup, InstalledPath, true);
             Launch(InstalledPath);
+            throw new IOException("The update failed. The previous app was restarted. Try the update again later.", exception);
         }
         return true;
     }

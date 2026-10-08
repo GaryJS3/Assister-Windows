@@ -239,13 +239,19 @@ public partial class MainWindow : Window
 
     private async Task InstallWhenIdleAsync(string staged)
     {
+        UpdateWindow? progressWindow = null;
         try
         {
             var token = _updateLifetime.Token;
             while (_playingInteraction is not null || _voiceActive || _activeInteraction is not null || !string.IsNullOrWhiteSpace(MessageInput.Text) || !SendButton.IsEnabled || OwnedWindows.Count > 0)
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
             token.ThrowIfCancellationRequested();
-            AutoUpdater.BeginInstall(staged);
+            progressWindow = new UpdateWindow();
+            Application.Current.MainWindow = progressWindow;
+            progressWindow.Show();
+            Close();
+            await Task.Run(() => AutoUpdater.BeginInstall(staged));
+            progressWindow.Complete();
             Application.Current.Shutdown();
         }
         catch (OperationCanceledException) when (_updateLifetime.IsCancellationRequested) { }
@@ -253,6 +259,7 @@ public partial class MainWindow : Window
         {
             _updatePending = false;
             AutoUpdater.Log($"Update installation failed: {exception.GetType().Name}.");
+            if (progressWindow is not null) progressWindow.ShowFailure($"Could not prepare the update: {exception.Message}. Close this window and reopen Assister to retry.");
             if (!_closed) ShowError($"Could not install the update: {exception.Message}");
         }
     }
