@@ -20,6 +20,15 @@ internal static class Program
                 return shouldFail ? Task.FromException<string>(new InvalidOperationException("Fixture unavailable")) : Task.FromResult("You're up to date · fixture");
             };
             var window = (SettingsWindow)constructor.Invoke([settings, check]);
+            var timeout = (TextBox)window.FindName("WakeWordConversationTimeoutInput");
+            if (timeout.Text != "60") throw new Exception("Wake conversation timeout must default to 60 seconds.");
+            foreach (var invalid in new[] { "-1", "86401", "abc", "1.5" })
+            {
+                timeout.Text = invalid;
+                ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (!((TextBlock)window.FindName("ErrorLabel")).Text.Contains("idle timeout"))
+                    throw new Exception("Invalid conversation timeout must be rejected before saving credentials.");
+            }
             var button = (Button)window.FindName("CheckForUpdatesButton");
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             var status = ((TextBlock)window.FindName("UpdateStatusLabel")).Text;
@@ -27,6 +36,6 @@ internal static class Program
                 throw new Exception("Manual update button failed to present its result or restore retry.");
             window.Close();
         }
-        Console.WriteLine("PASS: Settings loads; manual update button invokes shared check, shows success/failure, and restores retry.");
+        Console.WriteLine("PASS: Settings loads with 60-second wake timeout, rejects invalid timeouts; manual update feedback and retry.");
     }
 }

@@ -10,6 +10,8 @@ internal sealed class AppSettings
     public string Endpoint { get; set; } = "https://assister.example/";
     public Guid? ConversationId { get; set; }
     public bool WakeWordEnabled { get; set; }
+    public int WakeWordConversationTimeoutSeconds { get; set; } = 60;
+    public DateTimeOffset? LastConversationActivityUtc { get; set; }
     public string WakeWordModelDirectory { get; set; } = "";
     public string WakeWordKeywordsFile { get; set; } = "";
 

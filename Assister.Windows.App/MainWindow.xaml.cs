@@ -94,7 +94,6 @@ public partial class MainWindow : Window
     {
         if (_voiceActive || _activeInteraction is not null || OwnedWindows.Count > 0) return;
         if (_client is null || !_supportsVoice) { ShowError("Connect to a server supporting audio input before recording a voice command."); return; }
-        await StopPlaybackAsync();
         _voiceActive = true;
         _voiceSendAttempted = false;
         _voiceLifetime = new CancellationTokenSource();
@@ -117,7 +116,16 @@ public partial class MainWindow : Window
         {
             _wakeWordLifetime?.Cancel();
             await _wakeWordTask;
+            await StopPlaybackAsync();
             token.ThrowIfCancellationRequested();
+            if (ConversationIdlePolicy.ShouldStartNew(_messages.Count > 0, _settings.LastConversationActivityUtc,
+                DateTimeOffset.UtcNow, _settings.WakeWordConversationTimeoutSeconds))
+            {
+                VoiceNotice.Text = "Starting a new conversation…";
+                await CreateNewConversationAsync(token);
+                token.ThrowIfCancellationRequested();
+                VoiceNotice.Text = "Listening....";
+            }
             _voiceRecorder = new VoiceRecorder();
             _captureTask = _voiceRecorder.RecordAsync(token);
             VoiceSendButton.IsEnabled = true;
@@ -185,6 +193,7 @@ public partial class MainWindow : Window
             var token = _connectionLifetime?.Token ?? CancellationToken.None;
             _voiceAttachmentId ??= await _client.UploadVoiceAsync(recording.Pcm, token);
             var item = await _client.SubmitVoiceAsync(_conversationId, _voiceAttachmentId.Value, _voiceRequestKey!, token);
+            MarkConversationActivity();
             var chatItem = new ChatItem(item.Id, "Transcribing voice…", "", item.Status, item.LastSequence);
             if (_messages.All(message => message.Id != item.Id)) _messages.Add(chatItem);
             _activeInteraction = item.Id;
@@ -278,11 +287,21 @@ public partial class MainWindow : Window
             {
                 _conversationId = await client.CreateConversationAsync(token);
                 _settings.ConversationId = _conversationId;
+                _settings.LastConversationActivityUtc = null;
                 _settings.Save();
             }
             else _conversationId = _settings.ConversationId.Value;
 
             var history = await client.GetHistoryAsync(_conversationId, token);
+            if (history.Count > 0)
+            {
+                var latestMessage = history.Max(item => item.CreatedAt);
+                if (_settings.LastConversationActivityUtc is null || latestMessage > _settings.LastConversationActivityUtc)
+                {
+                    _settings.LastConversationActivityUtc = latestMessage;
+                    _settings.Save();
+                }
+            }
             _messages.Clear();
             _activeInteraction = null;
             CancelButton.Visibility = Visibility.Collapsed;
@@ -326,15 +345,35 @@ public partial class MainWindow : Window
         try
         {
             await StopPlaybackAsync();
-            _conversationId = await _client.CreateConversationAsync(_connectionLifetime?.Token ?? CancellationToken.None);
-            _settings.ConversationId = _conversationId;
-            _settings.Save();
-            _messages.Clear();
-            ActivityPanel.Items.Clear();
-            ConversationTitle.Text = "New conversation";
-            AddWelcome();
+            await CreateNewConversationAsync(_connectionLifetime?.Token ?? CancellationToken.None);
         }
         catch (Exception exception) { ShowError(exception.Message); }
+    }
+
+    private async Task CreateNewConversationAsync(CancellationToken token)
+    {
+        var conversationId = await _client!.CreateConversationAsync(token);
+        token.ThrowIfCancellationRequested();
+        _conversationId = conversationId;
+        _settings.ConversationId = conversationId;
+        _settings.LastConversationActivityUtc = null;
+        _settings.Save();
+        _messages.Clear();
+        _activeInteraction = null;
+        CancelButton.Visibility = Visibility.Collapsed;
+        ActivityPanel.Items.Clear();
+        ConversationTitle.Text = "New conversation";
+        AddWelcome();
+    }
+
+    private void MarkConversationActivity()
+    {
+        _settings.LastConversationActivityUtc = DateTimeOffset.UtcNow;
+        try { _settings.Save(); }
+        catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException)
+        {
+            ShowError("Could not save conversation activity: " + exception.Message);
+        }
     }
 
     private async void Send_Click(object sender, RoutedEventArgs e) => await SendMessageAsync();
@@ -361,6 +400,7 @@ public partial class MainWindow : Window
         try
         {
             var item = await _client.SubmitAsync(_conversationId, message, Guid.NewGuid().ToString(), _connectionLifetime?.Token ?? CancellationToken.None);
+            MarkConversationActivity();
             var chatItem = new ChatItem(item.Id, message, "", item.Status, item.LastSequence);
             _activeInteraction = item.Id;
             CancelButton.Visibility = Visibility.Visible;
@@ -424,6 +464,7 @@ public partial class MainWindow : Window
                 }
                 if (item.Status is "completed" or "failed" or "cancelled")
                 {
+                    MarkConversationActivity();
                     Dispatcher.Invoke(() =>
                     {
                         if (_activeInteraction == item.Id) { _activeInteraction = null; CancelButton.Visibility = Visibility.Collapsed; }
@@ -496,6 +537,7 @@ public partial class MainWindow : Window
             }, lifetime.Token);
             finalState = "completed";
             item.AudioStatus = "Audio finished";
+            if (_messages.Contains(item)) MarkConversationActivity();
         }
         catch (OperationCanceledException) { finalState = started ? "stopped" : "failed"; item.AudioStatus = "Audio stopped"; }
         catch (Exception exception) { item.AudioStatus = "Could not play audio: " + exception.Message; }

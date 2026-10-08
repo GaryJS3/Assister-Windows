@@ -1,6 +1,6 @@
 # Windows Port Progress
 
-Last reviewed: October 6, 2026.
+Last reviewed: October 7, 2026.
 
 ## Windows Test Device
 
@@ -13,6 +13,7 @@ This tracker separates code that exists from platform/server verification. Andro
 
 ## Implemented
 
+- [x] Wake word activations start a new conversation after more than 60 seconds of inactivity by default. Settings accepts 0–86400 idle seconds; 0 always continues the conversation. Empty conversations are reused. Activity is saved after successful submissions, terminal responses, and completed playback; restored history supplies the latest message timestamp when needed.
 - [x] Response audio: new `tts.audio` events automatically play authenticated server WAVs, with a session autoplay toggle and touch-sized Play/Stop controls. Historical speech controls restore from events without autoplay. Downloads and PCM validation are bounded; each attempt has a fresh playback ID and reports actual started/completed/stopped/failed states. Wake detection pauses during playback and resumes afterward; new input, connection/conversation changes, and shutdown stop playback.
 - [x] .NET 10 WPF solution and dark conversation/activity shell.
 - [x] Endpoint and bearer-token settings; token stored through Windows Credential Manager.
@@ -38,6 +39,8 @@ This tracker separates code that exists from platform/server verification. Andro
 - [ ] Add automated .NET tests for reducer, protocol transport, recovery, settings, and UI behavior.
 
 ## Verification Evidence
+
+- October 7, 2026 wake conversation timeout: `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\ConversationCheck`, `dotnet run --project checks\SettingsCheck`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\PlaybackCheck` passed. ConversationCheck covers the 60-second boundary, disabled/custom timeout, empty conversations, future/missing timestamps, existing settings defaults, and JSON persistence of timeout/activity. SettingsCheck verifies the displayed default and rejection of invalid timeout values before credential writes. Existing updater IL3000 warning remains. Physical wake activation, new-conversation creation against a live server, and tablet settings/touch acceptance were not run; no release was published. For history that predates activity tracking, the latest server message creation time is the fallback.
 
 - October 7, 2026 response playback: read the current canonical rich-client protocol and checked upstream endpoint source for audio, playback reports, and event history. `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\PlaybackCheck`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\SettingsCheck` passed. Existing updater IL3000 warning remains. PlaybackCheck verifies valid PCM, malformed/truncated/unsupported WAV rejection, authenticated download/report/history contracts, and oversized Content-Length rejection using a local HTTP fixture. No live TTS, physical speaker, playback device loss, touch/layout, or Tab-Dev checks ran. No release was published. Playback uses the default Windows output device, downloads afresh for replay, and keeps the autoplay preference only for the current app session.
 

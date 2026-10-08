@@ -18,6 +18,7 @@ public partial class SettingsWindow : Window
         UpdateVersionLabel.Text = $"Installed version {AutoUpdater.CurrentVersion}";
         EndpointInput.Text = settings.Endpoint;
         WakeWordEnabledInput.IsChecked = settings.WakeWordEnabled;
+        WakeWordConversationTimeoutInput.Text = settings.WakeWordConversationTimeoutSeconds.ToString();
         WakeWordModelInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordModelDirectory) ? WakeWordSetup.ModelDirectory : settings.WakeWordModelDirectory;
         WakeWordKeywordsInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordKeywordsFile) ? WakeWordSetup.KeywordsFile : settings.WakeWordKeywordsFile;
         WakeWordSetupStatus.Text = WakeWordSetup.IsInstalled() ? "Engine installed · ready to enable" : "One-time download from sherpa-onnx. No scripts or file selection needed.";
@@ -85,6 +86,8 @@ public partial class SettingsWindow : Window
         try
         {
             var wakeWordEnabled = WakeWordEnabledInput.IsChecked == true;
+            if (!int.TryParse(WakeWordConversationTimeoutInput.Text.Trim(), out var conversationTimeout) || conversationTimeout is < 0 or > 86400)
+                throw new ArgumentException("Enter an idle timeout from 0 to 86400 seconds (0 keeps the conversation).");
             if (wakeWordEnabled)
             {
                 if (WakeWordModelInput.Text == WakeWordSetup.ModelDirectory && !WakeWordSetup.IsInstalled())
@@ -96,9 +99,14 @@ public partial class SettingsWindow : Window
             using var client = new AssisterClient(EndpointInput.Text, token);
             CredentialStore.Save(token);
             var endpoint = EndpointInput.Text.Trim().TrimEnd('/') + "/";
-            if (!string.Equals(_settings.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase)) _settings.ConversationId = null;
+            if (!string.Equals(_settings.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.ConversationId = null;
+                _settings.LastConversationActivityUtc = null;
+            }
             _settings.Endpoint = endpoint;
             _settings.WakeWordEnabled = wakeWordEnabled;
+            _settings.WakeWordConversationTimeoutSeconds = conversationTimeout;
             _settings.WakeWordModelDirectory = WakeWordModelInput.Text.Trim();
             _settings.WakeWordKeywordsFile = WakeWordKeywordsInput.Text.Trim();
             _settings.Save();
