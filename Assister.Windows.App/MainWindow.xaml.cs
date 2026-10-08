@@ -98,7 +98,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task BeginVoiceAsync()
+    private async Task BeginVoiceAsync(bool continueConversation = false)
     {
         WakeConversation();
         if (_voiceActive || _activeInteraction is not null || OwnedWindows.Count > 0) return;
@@ -126,7 +126,7 @@ public partial class MainWindow : Window
             await _wakeWordSession.StopAsync();
             await StopPlaybackAsync();
             token.ThrowIfCancellationRequested();
-            if (ConversationIdlePolicy.ShouldStartNew(_messages.Count > 0, _settings.LastConversationActivityUtc,
+            if (!continueConversation && ConversationIdlePolicy.ShouldStartNew(_messages.Count > 0, _settings.LastConversationActivityUtc,
                 DateTimeOffset.UtcNow, _settings.WakeWordConversationTimeoutSeconds))
             {
                 VoiceNotice.Text = "Starting a new conversation…";
@@ -202,7 +202,7 @@ public partial class MainWindow : Window
             _voiceAttachmentId ??= await _client.UploadVoiceAsync(recording.Pcm, token);
             var item = await _client.SubmitVoiceAsync(_conversationId, _voiceAttachmentId.Value, _voiceRequestKey!, token);
             MarkConversationActivity();
-            var chatItem = new ChatItem(item.Id, "Transcribing voice…", "", item.Status, item.LastSequence);
+            var chatItem = new ChatItem(item.Id, "Transcribing voice…", "", item.Status, item.LastSequence, voiceInput: true);
             if (_messages.All(message => message.Id != item.Id)) _messages.Add(chatItem);
             _activeInteraction = item.Id;
             CancelButton.Visibility = Visibility.Visible;
@@ -466,7 +466,10 @@ public partial class MainWindow : Window
                             if (item.Input.Length > 0) ConversationTitle.Text = item.Input[..Math.Min(48, item.Input.Length)];
                             break;
                         case "response.delta": item.Response += ReadText(data, "text"); item.Status = "responding"; break;
-                        case "response.completed": item.Response = ReadText(data, "text"); break;
+                        case "response.completed":
+                            item.Response = ReadText(data, "text");
+                            item.FollowUp.SetResponse(item.Response);
+                            break;
                         case "tts.started": item.AudioError = ""; break;
                         case "tts.audio":
                             item.HasAudio = true;
@@ -479,14 +482,15 @@ public partial class MainWindow : Window
                             break;
                         case "tts.failed": item.AudioError = "Speech unavailable"; break;
                         case "interaction.cancelled":
+                            item.FollowUp.Abandon();
                             item.AfterSpeechTone = null;
                             item.SpeechStopped = true;
                             ClearTones();
                             if (_playingInteraction == item.Id) _playbackLifetime?.Cancel();
                             item.Status = "cancelled"; break;
                         case "interaction.started": item.Status = "running"; break;
-                        case "interaction.completed": item.Status = "completed"; break;
-                        case "interaction.failed": item.Status = "failed"; item.Error = ReadText(data, "message"); break;
+                        case "interaction.completed": item.Status = "completed"; item.FollowUp.CompleteInteraction(); break;
+                        case "interaction.failed": item.FollowUp.Abandon(); item.Status = "failed"; item.Error = ReadText(data, "message"); break;
 
 
                     }
@@ -500,6 +504,7 @@ public partial class MainWindow : Window
                     });
                 }
                 RenderMessages();
+                if (item.Status == "completed") _ = ReopenFollowUpAsync(item, client, cancellationToken);
             }
             // Resume after terminal events even when response autoplay is muted or speech failed.
             await _toneTask;
@@ -535,6 +540,7 @@ public partial class MainWindow : Window
         {
             item.AfterSpeechTone = null;
             item.SpeechStopped = true;
+            item.FollowUp.Abandon();
         }
     }
 
@@ -629,6 +635,7 @@ public partial class MainWindow : Window
             }, lifetime.Token);
             finalState = "completed";
             item.SpeechCompleted = true;
+            item.FollowUp.CompletePlayback();
             if (_messages.Contains(item)) MarkConversationActivity();
         }
         catch (OperationCanceledException) { finalState = started ? "stopped" : "failed"; }
@@ -645,6 +652,7 @@ public partial class MainWindow : Window
             {
                 item.SpeechStopped = true;
                 item.AfterSpeechTone = null;
+                item.FollowUp.Abandon();
             }
             try
             {
@@ -661,7 +669,30 @@ public partial class MainWindow : Window
                 RenderMessages();
                 try { await _toneTask; await RestartWakeWordAsync(); }
                 catch (Exception) { WakeWordStatus.Text = "Could not resume wake word"; }
+                if (finalState == "completed") _ = ReopenFollowUpAsync(item, client, _connectionLifetime!.Token);
             }
+        }
+    }
+    private async Task ReopenFollowUpAsync(ChatItem item, AssisterClient client, CancellationToken token)
+    {
+        var conversationId = _conversationId;
+        try
+        {
+            // This task is launched independently: recording must never await its own playback cleanup.
+            await _playbackTask;
+            await _toneTask;
+            if (_closed || token.IsCancellationRequested || !ReferenceEquals(client, _client) ||
+                conversationId != _conversationId || _messages.LastOrDefault() != item ||
+                _voiceActive || _voiceSending || _activeInteraction is not null || OwnedWindows.Count > 0 ||
+                !string.IsNullOrWhiteSpace(MessageInput.Text) || !_settings.AutoplayResponses || !item.AutoPlayed ||
+                !item.FollowUp.TryConsume()) return;
+            await BeginVoiceAsync(continueConversation: true);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            AutoUpdater.Log($"Follow-up microphone unavailable: {exception.GetType().Name}.");
+            if (!_closed) ShowError("Could not reopen the microphone. Select the microphone button to reply.");
         }
     }
     private async void Cancel_Click(object sender, RoutedEventArgs e)
@@ -742,8 +773,9 @@ public partial class MainWindow : Window
         ConnectionDot.Fill = (Brush)new BrushConverter().ConvertFromString(color)!;
     }
 
-    private sealed class ChatItem(Guid id, string input, string response, string status, long sequence)
+    private sealed class ChatItem(Guid id, string input, string response, string status, long sequence, bool voiceInput = false)
     {
+        public FollowUpVoiceState FollowUp { get; } = new(voiceInput);
         public ExecutionTimeline Timeline { get; } = new();
         public bool TraceExpanded { get; set; }
         public Guid Id { get; } = id;
