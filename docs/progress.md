@@ -1,0 +1,80 @@
+# Windows Port Progress
+
+Last reviewed: October 6, 2026.
+
+## Windows Test Device
+
+- Primary tablet: `Tab-Dev` (`10.0.0.197`), running Visual Studio 2026 Remote Debugger.
+- Local deployment credential is saved in the Git-ignored root `tab-dev-credentials.xml` using Windows DPAPI; it is scoped to the current Windows user and workstation.
+- Use it for touch/layout, scaling, orientation, microphone, speaker, and suspend/resume acceptance as corresponding features land. Record results separately from build and automated-test evidence.
+- Remote deployment/debugging has not yet been performed.
+
+This tracker separates code that exists from platform/server verification. Android behavior is a parity target, not evidence that the Windows app already supports it. Consult the [Android repository](https://github.com/GaryJS3/Assister-Android) for the source behavior and the [canonical rich-client protocol](https://github.com/GaryJS3/Assister/blob/main/docs/rich-client-protocol.md) for wire contracts.
+
+## Implemented
+
+- [x] Response audio: new `tts.audio` events automatically play authenticated server WAVs, with a session autoplay toggle and touch-sized Play/Stop controls. Historical speech controls restore from events without autoplay. Downloads and PCM validation are bounded; each attempt has a fresh playback ID and reports actual started/completed/stopped/failed states. Wake detection pauses during playback and resumes afterward; new input, connection/conversation changes, and shutdown stop playback.
+- [x] .NET 10 WPF solution and dark conversation/activity shell.
+- [x] Endpoint and bearer-token settings; token stored through Windows Credential Manager.
+- [x] Rich-client v1 negotiation, conversation creation/history restore, typed submission, WebSocket event replay, streamed answer display, basic step status, and remote cancel API method.
+- [x] Token input normalization for surrounding whitespace and an optional pasted `Bearer ` prefix; explicit HTTP 401 guidance during protocol negotiation.
+- [x] HTTPS-only origin validation except localhost/private IPv4 development-LAN origins; authenticated redirects disabled.
+- [x] Windows x64 Debug build and self-contained Release publish succeed (October 6, 2026).
+- [x] Root `assister-dev-token.txt` is ignored by Git for local Windows build publishing credentials.
+
+## Remaining Android Parity
+
+- [ ] Local wake word device acceptance: sherpa-onnx KWS listener and Settings opt-in implemented; see `docs/wake-word.md`. Microphone, tablet, window activation, device disconnect, and shutdown acceptance pending. Detection currently focuses typed chat; voice command capture remains pending.
+
+- [ ] Protocol DTOs and pure reducer with sequence deduplication, gap handling, all lifecycle/STT/response/step/context/TTS events, and model-round output separate from answers.
+- [ ] Durable pending request/idempotency recovery, draft persistence, robust reconnect state/backoff, cancellation UI, and process/window lifetime ownership.
+- [ ] Conversation list/selection, complete history and Markdown rendering with safe links, compact nested timeline and expandable step details.
+- [ ] Context and trace inspection, attachments, upload/download and provenance/truncation display.
+- [ ] Windows microphone permission/device handling, 16 kHz mono PCM recording, 30-second limit, endpoint detection, transcription feedback, and retry-safe voice submission.
+- [ ] Response-audio cache, Windows audio focus/device behavior, and physical speaker/lifecycle acceptance. Bounded WAV download/validation, playback controls/autoplay policy, and playback reports are implemented; see verification below.
+- [ ] Device capability registration, targeted requests, permission prompts, durable execution ledger, and structured outcomes.
+- [ ] Windows-native update/package flow, accessibility, responsive layout, structured redacted diagnostics, and installer/release guidance.
+- [ ] Windows build publisher that reads the ignored root upload token and uploads a signed package to a server-supported Windows release route; client update checks and install flow.
+- [ ] Add automated .NET tests for reducer, protocol transport, recovery, settings, and UI behavior.
+
+## Verification Evidence
+
+- October 7, 2026 response playback: read the current canonical rich-client protocol and checked upstream endpoint source for audio, playback reports, and event history. `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\PlaybackCheck`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\SettingsCheck` passed. Existing updater IL3000 warning remains. PlaybackCheck verifies valid PCM, malformed/truncated/unsupported WAV rejection, authenticated download/report/history contracts, and oversized Content-Length rejection using a local HTTP fixture. No live TTS, physical speaker, playback device loss, touch/layout, or Tab-Dev checks ran. No release was published. Playback uses the default Windows output device, downloads afresh for replay, and keeps the autoplay preference only for the current app session.
+
+- October 7, 2026 follow-up `2026.10.7.9`: voice commands now automatically send after one second of trailing silence; Send still stops and submits immediately, and Cancel discards before submission. Both triggers share a guarded send path, with no automatic retry after failure. No-speech recordings are discarded. VoiceCheck passed at the updated one-second boundary with speech resumption, no-speech/maximum-duration checks, and PCM upload/submission contract; SettingsCheck and build passed. Physical silence timing remains pending tablet acceptance.
+- `.\Publish-Windows.ps1 -Version 2026.10.7.9` published and verified the public 199,112,630-byte package. Release is available through the app updater; installation on Tab-Dev has not been observed during this run.
+
+- October 7, 2026 voice follow-up `2026.10.7.8`: wake activation now pauses KWS, hides the typed composer without focusing its text input, and records 16 kHz mono signed PCM with large Send/Cancel controls. Recording stops after 1.2 seconds of trailing silence, eight seconds without speech, or 30 seconds total. Silence ends capture and leaves Send/Cancel for explicit submission. Send uploads PCM and submits `audioAttachmentId` against the current canonical protocol; `stt.partial/final` update chat input. Cancel discards unsent audio. Retry retains the attachment ID and idempotency key; updates/settings/conversation changes are blocked during a voice session.
+- `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\SettingsCheck` passed. VoiceCheck verifies trailing silence with speech resumption, no-speech timeout, maximum duration, raw PCM bytes/Content-Type, and voice submission fields against a local HTTP fixture. User reported physical Tab-Dev wake detection on .7; recording/endpointing/touch/transcription on .8 remain pending physical acceptance. Energy endpointing is approximate and needs noisy/quiet microphone validation.
+- `.\Publish-Windows.ps1 -Version 2026.10.7.8` published and publicly verified the 199,112,630-byte package with SHA-256 `8775706B568DFEF4B64263C767250E6876BC9CEF9C0F4C287F8327F18C3C1BAE`; live update metadata offers .8 to .7 clients. Receipt of .8 on Tab-Dev has not been observed in this run.
+
+- October 7, 2026 release `2026.10.7.7`: completed Settings wake word setup and added **Check for updates**, installed-version display, success/error feedback, shared serialization with automatic checks, and installation deferred until Settings closes and chat is idle. Invalid updater origins now report an error instead of appearing up to date.
+- Validation: `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\SettingsCheck`, both WakeWordCheck setup/native fixture runs, and `dotnet run --project artifacts\UpdaterCheck` passed. SettingsCheck instantiates the actual WPF settings view and invokes its update button for successful and failed checks, confirming feedback and retry. Live microphone/touch/foreground activation and during-download cancellation remain pending physical acceptance.
+- `.\Publish-Windows.ps1 -Version 2026.10.7.7` passed and verified the public 199,096,246-byte self-contained package, SHA-256 `5D01686B0832C4D913D4687CE798C1AB9199AA0EF5BAB98B044A936DFE91B32C`. Live release checks offer .7 to .6 and report .7 current. Tab-Dev was responding on .6 at the final inspection; receipt/restart into .7 was not observed during this run. This release is published, not yet confirmed installed on the tablet.
+
+- October 7, 2026: Settings now installs the managed wake word engine with progress/cancellation, pinned SHA-256 verification, C# archive extraction, automatic paths and starter keyword creation, installation reuse, and Advanced custom paths. `dotnet run --project checks\WakeWordCheck -- --setup` passed against the real upstream download: managed installation ready, existing installation reused, cancellation before start honored, corrupt archive rejected before extraction. Managed starter keyword also passed streaming native inference against the official fixture (`light_up`). Build and self-contained x64 publish passed with the existing IL3000 updater warning. Settings layout/touch, cancellation during download, and Tab-Dev acceptance remain unverified; no release deployed.
+
+- October 7, 2026: local sherpa-onnx 1.13.8 CPU KWS and NAudio 3.1.0 capture integrated. `dotnet build .\Assister.Windows.sln` and self-contained win-x64 Release publish passed (existing updater IL3000 warning). `dotnet run --project checks\WakeWordCheck -- artifacts\kws\sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` passed: missing model rejected, silence ignored, official streaming WAV fixtures detected LIGHT UP, LOVELY CHILD, FOREVER. No live microphone or Tab-Dev checks ran for wake detection; no new release was deployed.
+
+- `dotnet build .\Assister.Windows.sln -c Debug` — passed after initial scaffolding (October 6, 2026).
+- `dotnet publish .\Assister.Windows.App\Assister.Windows.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\artifacts\windows-x64` — passed; generated a 139,732,046-byte x64 executable.
+- Authentication troubleshooting on October 6, 2026: server protocol source confirms `/api/client/protocol` checks the raw bearer token against configured rich-client tokens (24–512 characters); Android stores and transmits the entered token unchanged. Updated local Windows build to trim surrounding whitespace, remove an optional pasted `Bearer ` prefix, validate token length, and display a clear 401 error. Rebuilt successfully. A tablet update attempt did not replace the installed executable; the tablet remains on its previously verified build. A live 401 reproduction and token fingerprint comparison were not performed.
+- Tab-Dev deployment on October 6, 2026: copied the self-contained x64 build to `C:\Program Files\Assister`, verified the remote executable SHA-256 against the local publish (`889544A53D00B5CE5F111045DA2FB97EA29A0A059DE55A5DA6747EBDC4856AA0`), and added a common Start Menu shortcut. Launched as `TAB-DEV\Admin` in the active console session; remote process was running/responding in session 1, and no matching Application error was found. This confirms deployment and process startup; visual/touch acceptance and live server connection were not performed.
+- No live server, microphone, speaker, installer, or release validation has been performed for this app.
+
+## Windows updater implementation (October 6, 2026)
+
+- Automatic startup/15-minute public release checks, same-origin bounded downloads, size/SHA-256 and embedded EXE version checks, idle installation, separate replacement helper, backup, and restart implemented in C#.
+- Published `2026.10.7.1` to the existing `assister/windows-x64` server release channel; public download verified against local 139,748,442-byte single-file self-contained EXE and SHA-256.
+- First-run user installation uses Local AppData to permit unattended replacement. Publisher is `Publish-Windows.ps1`.
+- End-to-end tablet upgrade/restart validation is pending; implementation alone is not acceptance evidence. Packages are not Authenticode signed; production depends on trusted HTTPS hosting.
+
+### Completed updater device validation
+
+- Published and publicly verified Windows release `2026.10.7.6` (139,748,442 bytes).
+- Tab-Dev automatically upgraded `2026.10.7.5` to `2026.10.7.6` without a manual helper invocation for that upgrade. Log recorded download verification, installation/restart, and a new check from version `2026.10.7.6`; the restarted process was responding under `TAB-DEV\Admin`.
+- Installed user executable: `C:\Users\Admin\AppData\Local\Assister\App\Assister.Windows.App.exe`; tablet launch task and Start Menu shortcut point to it. Tablet and published SHA-256 both equal `C4C110C3742E31FBA13A5DD44238807A6B28FAB6F1A9D58E3E7DEEC80BCA206D`.
+- C# check harness exercised real download/metadata verification against the live server and rejected a deliberately incorrect SHA-256 from a local HTTP fixture before installation. Harness is under ignored `artifacts/UpdaterCheck`.
+- `dotnet build Assister.Windows.sln` and `git diff --check` passed. Build emits IL3000 for the intentional `Assembly.Location` check distinguishing bundled releases from development runs.
+- Earlier test instances overlapped; single-instance ownership now prevents multiple app update loops. The test helper invocation with PID 0 was invalid and caused an access error; the normal updater passes the actual parent PID. The successful automatic upgrade above supersedes the pending acceptance note.
+- Existing HTTP 401 client authentication remains a separate issue; release checks/downloads are public and do not use the chat token.

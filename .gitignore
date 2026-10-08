@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.pdb
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+artifacts/
+assister-dev-token.txt
+tab-dev-credentials.xml
+dev.md
