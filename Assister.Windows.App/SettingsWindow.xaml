@@ -30,6 +30,7 @@
             <TextBlock x:Name="UpdateVersionLabel" Foreground="#8B9AAF" Margin="0,0,0,8"/>
             <Button x:Name="CheckForUpdatesButton" Content="Check for updates" HorizontalAlignment="Left" Click="CheckForUpdates_Click"/>
             <TextBlock x:Name="UpdateStatusLabel" Text="Checks your saved server. Updates install after Settings closes and the chat is idle." Foreground="#8B9AAF" TextWrapping="Wrap" Margin="0,8,0,18"/>
+            <CheckBox x:Name="ProcessingSoundsInput" Content="Play processing sounds from the server" Foreground="#E7EDF5" MinHeight="44" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
             <TextBlock Text="Wake word" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"/>
             <CheckBox x:Name="WakeWordEnabledInput" Content="Listen for a wake word locally" Foreground="#E7EDF5" Margin="0,0,0,12"/>
             <TextBlock Text="Start a new conversation after this many idle seconds" Foreground="#E7EDF5" TextWrapping="Wrap"/>

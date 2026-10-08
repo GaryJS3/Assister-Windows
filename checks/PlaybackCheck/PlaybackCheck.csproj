@@ -9,5 +9,6 @@
     <PackageReference Include="NAudio" Version="3.1.0" />
     <Compile Include="../../Assister.Windows.App/Services/ResponseAudio.cs" Link="ResponseAudio.cs" />
     <Compile Include="../../Assister.Windows.App/Services/AssisterClient.cs" Link="AssisterClient.cs" />
+    <Compile Include="../../Assister.Windows.App/Services/ToneCue.cs" Link="ToneCue.cs" />
   </ItemGroup>
 </Project>

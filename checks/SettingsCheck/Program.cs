@@ -21,6 +21,8 @@ internal static class Program
             };
             var window = (SettingsWindow)constructor.Invoke([settings, check]);
             var timeout = (TextBox)window.FindName("WakeWordConversationTimeoutInput");
+            if (((CheckBox)window.FindName("ProcessingSoundsInput")).IsChecked != true)
+                throw new Exception("Processing sounds must default to enabled.");
             if (timeout.Text != "60") throw new Exception("Wake conversation timeout must default to 60 seconds.");
             var clockTimeout = (TextBox)window.FindName("IdleDisplayTimeoutInput");
             if (clockTimeout.Text != "180" || ((CheckBox)window.FindName("AutoplayResponsesInput")).IsChecked != true)

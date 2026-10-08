@@ -12,6 +12,7 @@ internal sealed class AppSettings
     public bool WakeWordEnabled { get; set; }
     public int WakeWordConversationTimeoutSeconds { get; set; } = 60;
     public bool AutoplayResponses { get; set; } = true;
+    public bool ProcessingSoundsEnabled { get; set; } = true;
     public int IdleDisplayTimeoutSeconds { get; set; } = 180;
     public DateTimeOffset? LastConversationActivityUtc { get; set; }
     public string WakeWordModelDirectory { get; set; } = "";

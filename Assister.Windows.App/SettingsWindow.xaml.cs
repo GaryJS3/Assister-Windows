@@ -20,6 +20,7 @@ public partial class SettingsWindow : Window
         WakeWordEnabledInput.IsChecked = settings.WakeWordEnabled;
         WakeWordConversationTimeoutInput.Text = settings.WakeWordConversationTimeoutSeconds.ToString();
         AutoplayResponsesInput.IsChecked = settings.AutoplayResponses;
+        ProcessingSoundsInput.IsChecked = settings.ProcessingSoundsEnabled;
         IdleDisplayTimeoutInput.Text = settings.IdleDisplayTimeoutSeconds.ToString();
         WakeWordModelInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordModelDirectory) ? WakeWordSetup.ModelDirectory : settings.WakeWordModelDirectory;
         WakeWordKeywordsInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordKeywordsFile) ? WakeWordSetup.KeywordsFile : settings.WakeWordKeywordsFile;
@@ -112,6 +113,7 @@ public partial class SettingsWindow : Window
             _settings.WakeWordEnabled = wakeWordEnabled;
             _settings.WakeWordConversationTimeoutSeconds = conversationTimeout;
             _settings.AutoplayResponses = AutoplayResponsesInput.IsChecked == true;
+            _settings.ProcessingSoundsEnabled = ProcessingSoundsInput.IsChecked == true;
             _settings.IdleDisplayTimeoutSeconds = displayTimeout;
             _settings.WakeWordModelDirectory = WakeWordModelInput.Text.Trim();
             _settings.WakeWordKeywordsFile = WakeWordKeywordsInput.Text.Trim();

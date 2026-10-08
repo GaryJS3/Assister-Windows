@@ -61,7 +61,7 @@ public partial class MainWindow
 
     private void UpdateIdleDisplay()
     {
-        var busy = _voiceActive || _playingInteraction is not null || _activeInteraction is not null ||
+        var busy = _voiceActive || _playingInteraction is not null || !_toneTask.IsCompleted || _activeInteraction is not null ||
             _messages.Any(item => item.Status is not ("completed" or "failed" or "cancelled")) ||
             !SendButton.IsEnabled || OwnedWindows.Count > 0;
         if (busy) { WakeConversation(); return; }

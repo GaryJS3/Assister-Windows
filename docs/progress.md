@@ -1,6 +1,6 @@
 # Windows Port Progress
 
-Last reviewed: October 7, 2026.
+Last reviewed: October 8, 2026.
 
 ## Windows Test Device
 
@@ -12,6 +12,8 @@ Last reviewed: October 7, 2026.
 This tracker separates code that exists from platform/server verification. Android behavior is a parity target, not evidence that the Windows app already supports it. Consult the [Android repository](https://github.com/GaryJS3/Assister-Android) for the source behavior and the [canonical rich-client protocol](https://github.com/GaryJS3/Assister/blob/main/docs/rich-client-protocol.md) for wire contracts.
 
 ## Implemented
+
+- [x] Server processing sounds: feature-detect `audio.tones`, consume fresh `tone.play` events, download the satellite WAV definitions from the configured server, and serialize cues with response speech. A saved **Play processing sounds from the server** checkbox defaults to enabled, including existing settings files. Historical restored interactions and expired/invalid cues remain silent. Deferred Goodbye plays once after successful speech completion and is cleared on Stop, cancellation, or navigation. Wake detection pauses during cues; cue failures preserve response playback. Physical speaker acceptance remains pending.
 
 - [x] Conversation chrome reduced to title, messages and composer: sidebar-only Settings, persisted autoplay in Settings, no protocol subtitle/footer copy or normal audio-status text. Conversation and Settings scroll by touch panning or mouse drag with hidden scrollbars; streaming avoids following the end during a gesture. Sidebar fullscreen/F11 covers the current monitor including taskbar and removes window chrome; Escape/button restores prior bounds and state. An idle clock replaces only the conversation pane after 180 seconds by default (configurable 0–86400 seconds; 0 disables), showing local time, day/date and configured wake-phrase labels. Input/wake activation returns to the preserved conversation; active work, playback, drafts and Settings defer the clock.
 
@@ -107,3 +109,9 @@ This tracker separates code that exists from platform/server verification. Andro
 - Validation: `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\UpdateCheck`, `dotnet run --project checks\SettingsCheck`, and `git diff --check` passed. UpdateCheck exercises actual WPF window handoff, close protection, worker-to-dispatcher status reporting, failure controls, and completion closure without installing a release. Progress/error renders under `artifacts/ui` were visually inspected. Existing IL3000 updater warning remains. No release was published and no live replacement/restart or physical Tab-Dev acceptance ran for this change.
 
 - October 8, 2026 updater progress release `2026.10.8.1`: implementation commit `70d673f` pushed to `origin/master`; `.\Publish-Windows.ps1 -Version 2026.10.8.1` published and verified the public 199,157,686-byte package with SHA-256 `C84C9215E91923C9BEA097E8633766580048ED5A2F73BFF7912F687C1AE7946A`. Live metadata offers `.8.1` to `2026.10.7.12` and reports `.8.1` current. Existing IL3000 warning remains. No tablet restart or installation was performed in this publication run. The upgrade into this release still uses the previous installed updater; the progress window applies to updates initiated from this release onward.
+
+### October 8, 2026 processing sounds
+
+- Read the current canonical rich-client protocol through GitHub and the current server `docs/voice-tones.md`, `ToneCatalog`, SDK download route, and satellite feedback paths. Windows uses server-timed cues rather than inventing local execution timings. Cue audio uses the existing bounded PCM WAV player and same-origin authenticated downloads, without trusting event-provided URLs or reporting cues as response playback.
+- `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\ToneCheck`, `dotnet run --project checks\SettingsCheck`, `dotnet run --project checks\VoiceCheck`, and `dotnet run --project checks\PlaybackCheck` passed. ToneCheck covers all canonical names, expired/malformed/unknown cues, deferred placement, existing-settings default-on migration, mute JSON roundtrip, and authenticated same-origin download against a local HTTP fixture. SettingsCheck verifies the actual WPF checkbox defaults to checked. Existing IL3000 updater warning remains.
+- Queue/speech ordering and cancellation were inspected in code; no live-server sound session, physical speaker/microphone interaction, settings touch/layout, or Tab-Dev acceptance ran. No release was published or deployed.

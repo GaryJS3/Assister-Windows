@@ -91,9 +91,18 @@ internal sealed class AssisterClient : IDisposable
     }
 
     public async Task<byte[]> DownloadAudioAsync(Guid interactionId, CancellationToken cancellationToken)
+        => await DownloadWavAsync($"api/client/interactions/{interactionId}/audio", cancellationToken);
+
+    public Task<byte[]> DownloadToneAsync(string name, CancellationToken cancellationToken)
+    {
+        if (!ToneCue.Names.Contains(name)) throw new ArgumentException("Unknown tone.", nameof(name));
+        return DownloadWavAsync($"api/voice/tones/{name}.wav", cancellationToken);
+    }
+
+    private async Task<byte[]> DownloadWavAsync(string path, CancellationToken cancellationToken)
     {
         const int limit = 8 * 1024 * 1024 + 65536;
-        using var response = await _http.GetAsync($"api/client/interactions/{interactionId}/audio", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await _http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException("Response audio exceeds the client limit.");
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);

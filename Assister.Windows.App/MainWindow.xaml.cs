@@ -22,11 +22,16 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _playbackLifetime;
     private readonly SemaphoreSlim _playbackGate = new(1, 1);
     private Task _playbackTask = Task.CompletedTask;
+    private Task _toneTask = Task.CompletedTask;
+    private CancellationTokenSource _toneLifetime = new();
+    private readonly SemaphoreSlim _audioOutputGate = new(1, 1);
+    private bool _tonePlaying;
     private Guid? _playingInteraction;
     private bool _closed;
     private readonly SemaphoreSlim _updateGate = new(1, 1);
     private bool _updatePending;
     private bool _supportsVoice;
+    private bool _supportsTones;
     private bool _voiceActive;
     private bool _voiceSending;
     private bool _voiceSendAttempted;
@@ -60,7 +65,7 @@ public partial class MainWindow : Window
         _wakeWordLifetime?.Dispose();
         if (_closed) return;
         WakeWordStatus.Text = "Wake word off";
-        if (!_settings.WakeWordEnabled || _voiceActive || _playingInteraction is not null) return;
+        if (!_settings.WakeWordEnabled || _voiceActive || _playingInteraction is not null || _tonePlaying) return;
         var lifetime = _wakeWordLifetime = new CancellationTokenSource();
         var detector = new WakeWordDetector();
         void OnUi(Action action) => Dispatcher.BeginInvoke(() =>
@@ -243,7 +248,7 @@ public partial class MainWindow : Window
         try
         {
             var token = _updateLifetime.Token;
-            while (_playingInteraction is not null || _voiceActive || _activeInteraction is not null || !string.IsNullOrWhiteSpace(MessageInput.Text) || !SendButton.IsEnabled || OwnedWindows.Count > 0)
+            while (_playingInteraction is not null || !_toneTask.IsCompleted || _voiceActive || _activeInteraction is not null || !string.IsNullOrWhiteSpace(MessageInput.Text) || !SendButton.IsEnabled || OwnedWindows.Count > 0)
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
             token.ThrowIfCancellationRequested();
             progressWindow = new UpdateWindow();
@@ -292,6 +297,7 @@ public partial class MainWindow : Window
             candidate = new AssisterClient(_settings.Endpoint, CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken() ?? "");
             using var protocol = await candidate.ConnectAsync(token);
             _supportsVoice = protocol.RootElement.TryGetProperty("features", out var voiceFeatures) && voiceFeatures.EnumerateArray().Any(feature => feature.GetString() == "audio.input");
+            _supportsTones = protocol.RootElement.TryGetProperty("features", out var toneFeatures) && toneFeatures.EnumerateArray().Any(feature => feature.GetString() == "audio.tones");
             var client = candidate;
             _client = client;
             candidate = null;
@@ -444,6 +450,17 @@ public partial class MainWindow : Window
                     item.Timeline.Apply(root);
                     switch (type)
                     {
+                        case "tone.play":
+                            if (_supportsTones && item.AutoPlay && _settings.ProcessingSoundsEnabled && ToneCue.Read(data, DateTimeOffset.UtcNow) is { } cue)
+                            {
+                                if (cue.AfterSpeech)
+                                {
+                                    if (item.SpeechCompleted) QueueTone(client, item, cue, cancellationToken, deferred: true);
+                                    else if (!item.SpeechStopped) item.AfterSpeechTone = cue;
+                                }
+                                else QueueTone(client, item, cue, cancellationToken);
+                            }
+                            break;
                         case "stt.started": item.Input = "Transcribing voice…"; item.Status = "transcribing"; break;
                         case "stt.partial": case "stt.final":
                             item.Input = ReadText(data, "text");
@@ -463,6 +480,9 @@ public partial class MainWindow : Window
                             break;
                         case "tts.failed": item.AudioError = "Speech unavailable"; break;
                         case "interaction.cancelled":
+                            item.AfterSpeechTone = null;
+                            item.SpeechStopped = true;
+                            ClearTones();
                             if (_playingInteraction == item.Id) _playbackLifetime?.Cancel();
                             item.Status = "cancelled"; break;
                         case "interaction.started": item.Status = "running"; break;
@@ -503,10 +523,68 @@ public partial class MainWindow : Window
         if (!token.IsCancellationRequested && !_closed) RenderMessages();
     }
 
-    private async Task StopPlaybackAsync()
+    private void ClearTones()
     {
+        _toneLifetime.Cancel();
+        _toneLifetime.Dispose();
+        _toneLifetime = new();
+        foreach (var item in _messages)
+        {
+            item.AfterSpeechTone = null;
+            item.SpeechStopped = true;
+        }
+    }
+
+    private void QueueTone(AssisterClient client, ChatItem item, ToneCue cue, CancellationToken token, bool deferred = false)
+    {
+        var previous = _toneTask;
+        _toneTask = PlayToneAsync(previous, client, item, cue, token, _toneLifetime.Token, deferred);
+    }
+
+    private async Task PlayToneAsync(Task previous, AssisterClient client, ChatItem item, ToneCue cue,
+        CancellationToken connectionToken, CancellationToken toneToken, bool deferred)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(connectionToken, toneToken);
+        var acquired = false;
+        try
+        {
+            await previous;
+            await _audioOutputGate.WaitAsync(lifetime.Token);
+            acquired = true;
+            if (_closed || _voiceActive || !_messages.Contains(item) || item.SpeechStopped || item.TonesFailed ||
+                !_settings.ProcessingSoundsEnabled || (!deferred && cue.ExpiresAt <= DateTimeOffset.UtcNow)) return;
+            lifetime.CancelAfter(TimeSpan.FromSeconds(5));
+            _tonePlaying = true;
+            _wakeWordLifetime?.Cancel();
+            await _wakeWordTask;
+            var bytes = await client.DownloadToneAsync(cue.Name, lifetime.Token);
+            if (!deferred && cue.ExpiresAt <= DateTimeOffset.UtcNow) return;
+            await ResponseAudio.PlayAsync(bytes, () => Task.CompletedTask, lifetime.Token);
+        }
+        catch (OperationCanceledException) when (connectionToken.IsCancellationRequested || toneToken.IsCancellationRequested) { }
+        catch (OperationCanceledException) { item.TonesFailed = true; }
+        catch (Exception exception)
+        {
+            item.TonesFailed = true;
+            AutoUpdater.Log($"Processing sound unavailable: {exception.GetType().Name}.");
+        }
+        finally
+        {
+            if (acquired) { _tonePlaying = false; _audioOutputGate.Release(); }
+            if (!_closed && !connectionToken.IsCancellationRequested && _playingInteraction is null && !_voiceActive)
+            {
+                try { await RestartWakeWordAsync(); }
+                catch (Exception) { }
+            }
+        }
+    }
+
+    private async Task StopPlaybackAsync(bool clearTones = true)
+    {
+        if (clearTones) ClearTones();
         _playbackLifetime?.Cancel();
         await _playbackTask;
+        if (clearTones) await _toneTask;
     }
 
     private async Task StartPlaybackAsync(ChatItem item)
@@ -514,7 +592,7 @@ public partial class MainWindow : Window
         await _playbackGate.WaitAsync();
         try
         {
-            await StopPlaybackAsync();
+            await StopPlaybackAsync(clearTones: false);
             if (_closed || _voiceActive || _client is null || !_messages.Contains(item)) return;
             var lifetime = CancellationTokenSource.CreateLinkedTokenSource(_connectionLifetime!.Token);
             _playbackLifetime = lifetime;
@@ -530,8 +608,12 @@ public partial class MainWindow : Window
         var playbackId = Guid.NewGuid();
         var finalState = "failed";
         var started = false;
+        var acquired = false;
         try
         {
+            await _toneTask;
+            await _audioOutputGate.WaitAsync(lifetime.Token);
+            acquired = true;
             item.AudioError = "";
             RenderMessages();
             _wakeWordLifetime?.Cancel();
@@ -545,12 +627,24 @@ public partial class MainWindow : Window
                 await client.ReportPlaybackAsync(item.Id, playbackId, "started", lifetime.Token);
             }, lifetime.Token);
             finalState = "completed";
+            item.SpeechCompleted = true;
             if (_messages.Contains(item)) MarkConversationActivity();
         }
         catch (OperationCanceledException) { finalState = started ? "stopped" : "failed"; }
         catch (Exception exception) { item.AudioError = "Could not play audio: " + exception.Message; }
         finally
         {
+            if (acquired) _audioOutputGate.Release();
+            if (finalState == "completed" && item.AfterSpeechTone is { } cue)
+            {
+                item.AfterSpeechTone = null;
+                QueueTone(client, item, cue, _connectionLifetime!.Token, deferred: true);
+            }
+            else if (finalState != "completed")
+            {
+                item.SpeechStopped = true;
+                item.AfterSpeechTone = null;
+            }
             try
             {
                 // Reports outlive a user Stop, but remain bounded when the server is unavailable.
@@ -564,7 +658,7 @@ public partial class MainWindow : Window
             if (!_closed)
             {
                 RenderMessages();
-                try { await RestartWakeWordAsync(); }
+                try { await _toneTask; await RestartWakeWordAsync(); }
                 catch (Exception) { WakeWordStatus.Text = "Could not resume wake word"; }
             }
         }
@@ -573,6 +667,9 @@ public partial class MainWindow : Window
     {
         if (_activeInteraction is not { } id || _client is null) return;
         CancelButton.IsEnabled = false;
+        ClearTones();
+        var item = _messages.FirstOrDefault(item => item.Id == id);
+        if (item is not null) item.SpeechStopped = true;
         try { await _client.CancelAsync(id, _connectionLifetime?.Token ?? CancellationToken.None); }
         catch (Exception exception) { ShowError($"Could not cancel the request: {exception.Message}"); }
         finally { CancelButton.IsEnabled = true; }
@@ -656,6 +753,10 @@ public partial class MainWindow : Window
         public bool HasAudio { get; set; }
         public bool AutoPlay { get; set; } = true;
         public bool AutoPlayed { get; set; }
+        public ToneCue? AfterSpeechTone { get; set; }
+        public bool SpeechCompleted { get; set; }
+        public bool SpeechStopped { get; set; }
+        public bool TonesFailed { get; set; }
         public string AudioError { get; set; } = "";
         public string? Error { get; set; }
     }
