@@ -1,6 +1,6 @@
 # Windows Port Progress
 
-Last reviewed: October 8, 2026.
+Last reviewed: October 25, 2026.
 
 ## Windows Test Device
 
@@ -12,6 +12,8 @@ Last reviewed: October 8, 2026.
 This tracker separates code that exists from platform/server verification. Android behavior is a parity target, not evidence that the Windows app already supports it. Consult the [Android repository](https://github.com/GaryJS3/Assister-Android) for the source behavior and the [canonical rich-client protocol](https://github.com/GaryJS3/Assister/blob/main/docs/rich-client-protocol.md) for wire contracts.
 
 ## Implemented
+
+- [x] Authenticated Windows device registration using the computer name and `windows` client type. Presence renews every 30 seconds, retries transient failures, and withdraws before replacing a connection or closing the app. Initial registration failure prevents a successful connection indication. No device-action capabilities are advertised. Live server visibility and Tab-Dev lifecycle acceptance remain pending.
 
 - [x] Server processing sounds: feature-detect `audio.tones`, consume fresh `tone.play` events, download the satellite WAV definitions from the configured server, and serialize cues with response speech. A saved **Play processing sounds from the server** checkbox defaults to enabled, including existing settings files. Historical restored interactions and expired/invalid cues remain silent. Deferred Goodbye plays once after successful speech completion and is cleared on Stop, cancellation, or navigation. Wake detection pauses during cues; cue failures preserve response playback. Physical speaker acceptance remains pending.
 
@@ -39,12 +41,14 @@ This tracker separates code that exists from platform/server verification. Andro
 - [ ] Context and trace inspection, attachments, upload/download and provenance/truncation display.
 - [ ] Windows microphone permission/device handling, 16 kHz mono PCM recording, 30-second limit, endpoint detection, transcription feedback, and retry-safe voice submission.
 - [ ] Response-audio cache, Windows audio focus/device behavior, and physical speaker/lifecycle acceptance. Bounded WAV download/validation, playback controls/autoplay policy, and playback reports are implemented; see verification below.
-- [ ] Device capability registration, targeted requests, permission prompts, durable execution ledger, and structured outcomes.
+- [ ] Device capabilities, targeted requests, permission prompts, durable execution ledger, and structured outcomes. Basic device registration/presence is implemented.
 - [ ] Windows-native update/package flow, accessibility, responsive layout, structured redacted diagnostics, and installer/release guidance.
 - [ ] Windows build publisher that reads the ignored root upload token and uploads a signed package to a server-supported Windows release route; client update checks and install flow.
 - [ ] Add automated .NET tests for reducer, protocol transport, recovery, settings, and UI behavior.
 
 ## Verification Evidence
+
+- October 25, 2026 registration: read the current upstream canonical rich-client protocol and SDK registration route; reviewed Android registration deferral in the handoff. `dotnet build .\Assister.Windows.sln`, `dotnet run --project checks\RegistrationCheck`, `dotnet run --project checks\UpdateCheck`, and `git diff --check` passed. The C# HTTP fixture verifies bearer authentication, canonical registration body, renewal, temporary HTTP 503 recovery, renewal stopping before DELETE withdrawal, and initial HTTP 401 rejection. Initial fixed fixture port was unavailable; checks now select available ports. Existing updater IL3000 warning appears on a full rebuild. No live-server registration, physical Tab-Dev check, release publication, or deployment ran. Identity/ownership still derive from the server-configured token; registration does not provision credentials or implement notifications/device actions. A crash/network outage relies on the server's 90-second lease expiry.
 
 - October 7, 2026 display release `2026.10.7.12`: implementation commit `b63bbce` pushed to `origin/master`; `.\Publish-Windows.ps1 -Version 2026.10.7.12` published and verified the 199,153,592-byte package with SHA-256 `B1B4763305E6C1B413B17A076877346B9F9761A616A172E3859676259310ADFD`. Restarted Tab-Dev through its existing launch task to trigger startup checking. The updater verified, installed and restarted `.12`; the installed version and hash match the release, startup logs check from `.12`, and process PID 3828 was responding. User settings/token storage were preserved. Physical finger panning, idle wake-word return and distance readability still require hands-on acceptance.
 

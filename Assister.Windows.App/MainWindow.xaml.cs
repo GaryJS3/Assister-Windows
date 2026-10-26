@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly ObservableCollection<ChatItem> _messages = [];
     private AssisterClient? _client;
+    private ClientPresence? _presence;
     private CancellationTokenSource? _connectionLifetime;
     private Guid _conversationId;
     private Guid? _activeInteraction;
@@ -53,7 +54,21 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken())) await ConnectAsync();
             else AddWelcome();
         };
-        Closed += (_, _) => { _closed = true; _idleTimer.Stop(); _playbackLifetime?.Cancel(); _voiceLifetime?.Cancel(); _wakeWordSession.Close(); _updateLifetime.Cancel(); _connectionLifetime?.Cancel(); _client?.Dispose(); };
+        Closing += async (_, e) =>
+        {
+            if (_closed) return;
+            e.Cancel = true;
+            _closed = true;
+            _idleTimer.Stop();
+            _playbackLifetime?.Cancel();
+            _voiceLifetime?.Cancel();
+            _wakeWordSession.Close();
+            _updateLifetime.Cancel();
+            _connectionLifetime?.Cancel();
+            await StopPresenceAsync();
+            _client?.Dispose();
+            Close();
+        };
     }
 
     private async Task RestartWakeWordAsync()
@@ -253,6 +268,7 @@ public partial class MainWindow : Window
             progressWindow = new UpdateWindow();
             Application.Current.MainWindow = progressWindow;
             progressWindow.Show();
+            await StopPresenceAsync();
             Close();
             await Task.Run(() => AutoUpdater.BeginInstall(staged));
             progressWindow.Complete();
@@ -286,6 +302,7 @@ public partial class MainWindow : Window
     {
         await StopPlaybackAsync();
         _connectionLifetime?.Cancel();
+        await StopPresenceAsync();
         _client?.Dispose();
         _connectionLifetime = new CancellationTokenSource();
         var token = _connectionLifetime.Token;
@@ -300,6 +317,12 @@ public partial class MainWindow : Window
             var client = candidate;
             _client = client;
             candidate = null;
+            _presence = new ClientPresence(client, registered => Dispatcher.BeginInvoke(() =>
+            {
+                if (!_closed && !token.IsCancellationRequested && ReferenceEquals(client, _client))
+                    SetConnection(registered ? "Connected" : "Registration retrying…", registered ? "#74D6B2" : "#E4A95C");
+            }));
+            await _presence.StartAsync(token);
             if (_settings.ConversationId is null)
             {
                 _conversationId = await client.CreateConversationAsync(token);
@@ -346,6 +369,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { }
         catch (Exception exception)
         {
+            await StopPresenceAsync();
             _client?.Dispose();
             _client = null;
             SetConnection("Connection failed", "#E27C7C");
@@ -353,6 +377,13 @@ public partial class MainWindow : Window
             AddWelcome("Could not connect. Open Settings to check the server and token.");
         }
         finally { candidate?.Dispose(); }
+    }
+
+    private async Task StopPresenceAsync()
+    {
+        var presence = _presence;
+        _presence = null;
+        if (presence is not null) await presence.DisposeAsync();
     }
 
     private async void NewConversation_Click(object sender, RoutedEventArgs e)

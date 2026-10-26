@@ -70,6 +70,19 @@ internal sealed class AssisterClient : IDisposable
         return result.RootElement.GetProperty("id").GetGuid();
     }
 
+    public async Task RegisterAsync(CancellationToken cancellationToken)
+    {
+        using var response = await _http.PostAsJsonAsync("api/client/clients/register",
+            new { clientType = "windows", deviceName = Environment.MachineName, capabilities = Array.Empty<string>() }, Json, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task WithdrawPresenceAsync(CancellationToken cancellationToken)
+    {
+        using var response = await _http.DeleteAsync("api/client/clients/current", cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<IReadOnlyList<InteractionSnapshot>> GetHistoryAsync(Guid conversationId, CancellationToken cancellationToken)
     {
         return await _http.GetFromJsonAsync<InteractionSnapshot[]>($"api/client/conversations/{conversationId}", Json, cancellationToken) ?? [];
