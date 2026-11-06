@@ -7,6 +7,7 @@ namespace Assister.Windows.App.Services;
 
 internal sealed class AppSettings
 {
+    private string? _storagePath;
     public string Endpoint { get; set; } = "https://assister.example/";
     public Guid? ConversationId { get; set; }
     public bool WakeWordEnabled { get; set; }
@@ -20,19 +21,24 @@ internal sealed class AppSettings
 
     private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Assister", "settings.json");
 
-    public static AppSettings Load()
+    public static AppSettings Load(string? storagePath = null)
     {
-        try { return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new(); }
-        catch (IOException) { return new(); }
-        catch (JsonException) { return new(); }
+        AppSettings settings;
+        try { settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(storagePath ?? FilePath)) ?? new(); }
+        catch (IOException) { settings = new(); }
+        catch (JsonException) { settings = new(); }
+        catch (UnauthorizedAccessException) { settings = new(); }
+        settings._storagePath = storagePath;
+        return settings;
     }
 
     public void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var temporary = FilePath + ".tmp";
+        var path = _storagePath ?? FilePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(this));
-        File.Move(temporary, FilePath, overwrite: true);
+        File.Move(temporary, path, overwrite: true);
     }
 }
 
@@ -59,8 +65,8 @@ internal static class CredentialStore
         {
             for (var index = 0; index < bytes.Length; index++) Marshal.WriteByte(blob, index, 0);
             Marshal.FreeHGlobal(blob);
+            Array.Clear(bytes);
         }
-        Array.Clear(bytes);
     }
 
     public static string? Read()

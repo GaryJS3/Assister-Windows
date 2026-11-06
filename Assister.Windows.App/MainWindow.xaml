@@ -12,8 +12,8 @@
         <Style TargetType="Button">
             <Setter Property="Foreground" Value="#E7EDF5"/><Setter Property="Background" Value="#202B39"/>
             <Setter Property="BorderBrush" Value="#2A3849"/><Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="13,9"/><Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></ControlTemplate></Setter.Value></Setter>
+            <Setter Property="Padding" Value="13,9"/><Setter Property="Cursor" Value="Hand"/><Setter Property="MinHeight" Value="44"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonSurface" Property="BorderBrush" Value="#74D6B2"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonSurface" Property="Background" Value="#304556"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonSurface" Property="Opacity" Value="0.65"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonSurface" Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Foreground" Value="#E7EDF5"/><Setter Property="Background" Value="#111923"/>
@@ -32,7 +32,8 @@
                     </StackPanel>
                     <Button Content="＋   New conversation" HorizontalContentAlignment="Left" Background="#1B2A2C" BorderBrush="#2B5148" Click="NewConversation_Click"/>
                     <TextBlock Text="WORKSPACE" Foreground="{StaticResource Muted}" FontSize="14" FontWeight="Bold" Margin="8,28,0,10"/>
-                    <Button Content="◉   Conversation" HorizontalContentAlignment="Left" Background="#1A2631" BorderBrush="#273749"/>
+                    <Button Content="◉   Conversation" HorizontalContentAlignment="Left" Background="#1A2631" BorderBrush="#273749" Click="Conversation_Click"/>
+                    <Button Content="Reconnect" Margin="0,7,0,0" Click="Reconnect_Click" ToolTip="Reload the current conversation and reconnect to the server"/>
                     <Button Content="⚙   Settings" HorizontalContentAlignment="Left" Background="Transparent" BorderBrush="Transparent" Margin="0,7,0,0" Click="Settings_Click"/>
                     <Button x:Name="FullscreenButton" Content="⛶   Fullscreen" Background="Transparent" BorderBrush="Transparent" Margin="0,7,0,0" Click="Fullscreen_Click" ToolTip="Toggle fullscreen (F11). Escape exits fullscreen."/>
                 </StackPanel>
@@ -69,7 +70,7 @@
                     <Border x:Name="TypedComposer" Background="#121A24" BorderBrush="#2A3849" BorderThickness="1" CornerRadius="13" Padding="12">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBox x:Name="MessageInput" Grid.Column="0" BorderThickness="0" Background="Transparent" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="54" MaxHeight="150" VerticalScrollBarVisibility="Auto" FontSize="22" VerticalContentAlignment="Center" KeyDown="MessageInput_KeyDown"/>
+                            <TextBox x:Name="MessageInput" Grid.Column="0" AutomationProperties.Name="Message" ToolTip="Enter to send; Shift+Enter for a new line" BorderThickness="0" Background="Transparent" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="54" MaxHeight="150" VerticalScrollBarVisibility="Auto" FontSize="22" VerticalContentAlignment="Center" KeyDown="MessageInput_KeyDown"/>
                             <Button x:Name="MicrophoneButton" Grid.Column="1" MinWidth="56" MinHeight="56" VerticalAlignment="Bottom" Margin="10,0,0,0"
                                     ToolTip="Record a voice command" AutomationProperties.Name="Record a voice command" Click="Microphone_Click">
                                 <Viewbox Width="24" Height="28">

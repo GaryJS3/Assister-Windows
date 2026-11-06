@@ -28,6 +28,10 @@ public partial class MainWindow : Window
     private bool _tonePlaying;
     private Guid? _playingInteraction;
     private bool _closed;
+    private bool _connecting;
+    private bool _navigating;
+    private bool _textSending;
+    private (Guid Conversation, string Message, string Key)? _pendingText;
     private readonly SemaphoreSlim _updateGate = new(1, 1);
     private bool _updatePending;
     private bool _supportsVoice;
@@ -59,6 +63,7 @@ public partial class MainWindow : Window
             if (_closed) return;
             e.Cancel = true;
             _closed = true;
+            ClearTones();
             _idleTimer.Stop();
             _playbackLifetime?.Cancel();
             _voiceLifetime?.Cancel();
@@ -67,7 +72,9 @@ public partial class MainWindow : Window
             _connectionLifetime?.Cancel();
             await StopPresenceAsync();
             _client?.Dispose();
-            Close();
+            // Presence cleanup may complete synchronously (for example while offline).
+            // Defer the second Close until WPF has left the first Closing callback.
+            _ = Dispatcher.BeginInvoke(new Action(Close));
         };
     }
 
@@ -116,7 +123,7 @@ public partial class MainWindow : Window
     private async Task BeginVoiceAsync(bool continueConversation = false)
     {
         WakeConversation();
-        if (_voiceActive || _activeInteraction is not null || OwnedWindows.Count > 0) return;
+        if (_closed || _connecting || _navigating || _textSending || _voiceActive || _activeInteraction is not null || OwnedWindows.Count > 0) return;
         if (_client is null || !_supportsVoice) { ShowError("Connect to a server supporting audio input before recording a voice command."); return; }
         _voiceActive = true;
         _voiceSendAttempted = false;
@@ -262,7 +269,7 @@ public partial class MainWindow : Window
         try
         {
             var token = _updateLifetime.Token;
-            while (_playingInteraction is not null || !_toneTask.IsCompleted || _voiceActive || _activeInteraction is not null || !string.IsNullOrWhiteSpace(MessageInput.Text) || !SendButton.IsEnabled || OwnedWindows.Count > 0)
+            while (_connecting || _navigating || _textSending || _playingInteraction is not null || !_toneTask.IsCompleted || _voiceActive || _activeInteraction is not null || !string.IsNullOrWhiteSpace(MessageInput.Text) || !SendButton.IsEnabled || OwnedWindows.Count > 0)
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
             token.ThrowIfCancellationRequested();
             progressWindow = new UpdateWindow();
@@ -287,6 +294,7 @@ public partial class MainWindow : Window
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
         WakeConversation();
+        if (_connecting || _navigating || _textSending) { ShowError("Wait for the current operation before opening Settings."); return; }
         if (_voiceActive) { ShowError("Send or cancel the voice recording before opening Settings."); return; }
         var dialog = new SettingsWindow(_settings, CheckForUpdatesAsync) { Owner = this };
         if (dialog.ShowDialog() == true)
@@ -300,10 +308,20 @@ public partial class MainWindow : Window
 
     private async Task ConnectAsync()
     {
+        if (_closed || _connecting || _navigating || _textSending || _voiceActive) return;
+        _connecting = true;
+        try { await ConnectCoreAsync(); }
+        finally { _connecting = false; }
+    }
+
+    private async Task ConnectCoreAsync()
+    {
         await StopPlaybackAsync();
         _connectionLifetime?.Cancel();
         await StopPresenceAsync();
         _client?.Dispose();
+        _client = null;
+        _connectionLifetime?.Dispose();
         _connectionLifetime = new CancellationTokenSource();
         var token = _connectionLifetime.Token;
         SetConnection("Connecting…", "#E4A95C");
@@ -332,7 +350,17 @@ public partial class MainWindow : Window
             }
             else _conversationId = _settings.ConversationId.Value;
 
-            var history = await client.GetHistoryAsync(_conversationId, token);
+            IReadOnlyList<AssisterClient.InteractionSnapshot> history;
+            try { history = await client.GetHistoryAsync(_conversationId, token); }
+            catch (System.Net.Http.HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                // Retention can remove an old conversation while its ID remains in local settings.
+                _conversationId = await client.CreateConversationAsync(token);
+                _settings.ConversationId = _conversationId;
+                _settings.LastConversationActivityUtc = null;
+                _settings.Save();
+                history = [];
+            }
             if (history.Count > 0)
             {
                 var latestMessage = history.Max(item => item.CreatedAt);
@@ -379,6 +407,10 @@ public partial class MainWindow : Window
         finally { candidate?.Dispose(); }
     }
 
+    private async void Reconnect_Click(object sender, RoutedEventArgs e) => await ConnectAsync();
+
+    private void Conversation_Click(object sender, RoutedEventArgs e) => WakeConversation();
+
     private async Task StopPresenceAsync()
     {
         var presence = _presence;
@@ -388,14 +420,17 @@ public partial class MainWindow : Window
 
     private async void NewConversation_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed || _connecting || _navigating || _textSending) return;
         if (_voiceActive) { ShowError("Send or cancel the voice recording before starting a new conversation."); return; }
         if (_client is null) { Settings_Click(sender, e); return; }
+        _navigating = true;
         try
         {
             await StopPlaybackAsync();
             await CreateNewConversationAsync(_connectionLifetime?.Token ?? CancellationToken.None);
         }
         catch (Exception exception) { ShowError(exception.Message); }
+        finally { _navigating = false; }
     }
 
     private async Task CreateNewConversationAsync(CancellationToken token)
@@ -440,29 +475,54 @@ public partial class MainWindow : Window
 
     private async Task SendMessageAsync()
     {
-        if (_voiceActive) return;
+        if (_closed || _connecting || _navigating || _textSending || _voiceActive) return;
+        if (_activeInteraction is not null) { ShowError("Wait for the current response or cancel it before sending another message."); return; }
         var message = MessageInput.Text.Trim();
         if (message.Length == 0) return;
         if (message.Length > 1000) { ShowError("Messages are limited to 1,000 characters."); return; }
         if (_client is null) { ShowError("Connect to an Assister server in Settings before sending."); return; }
 
-        await StopPlaybackAsync();
+        _textSending = true;
         SendButton.IsEnabled = false;
+        var draft = MessageInput.Text;
+        var client = _client;
+        var token = _connectionLifetime?.Token ?? CancellationToken.None;
+        if (_pendingText is not { } pending || pending.Conversation != _conversationId || pending.Message != message)
+            _pendingText = (_conversationId, message, Guid.NewGuid().ToString());
         try
         {
-            var item = await _client.SubmitAsync(_conversationId, message, Guid.NewGuid().ToString(), _connectionLifetime?.Token ?? CancellationToken.None);
+            await StopPlaybackAsync();
+            await _wakeWordSession.StopAsync();
+            var item = await client.SubmitAsync(_conversationId, message, _pendingText.Value.Key, token);
+            token.ThrowIfCancellationRequested();
+            _pendingText = null;
             MarkConversationActivity();
+            // An uncertain request may already have been restored by Reconnect. Its existing
+            // observer/history owns this item; never observe a new, unattached duplicate.
+            if (_messages.Any(existing => existing.Id == item.Id))
+            {
+                if (MessageInput.Text == draft) MessageInput.Clear();
+                NoticeLabel.Visibility = Visibility.Collapsed;
+                return;
+            }
             var chatItem = new ChatItem(item.Id, message, "", item.Status, item.LastSequence);
             _activeInteraction = item.Id;
             CancelButton.Visibility = Visibility.Visible;
             _messages.Add(chatItem);
-            MessageInput.Clear();
+            if (MessageInput.Text == draft) MessageInput.Clear();
+            NoticeLabel.Visibility = Visibility.Collapsed;
             ConversationTitle.Text = message[..Math.Min(48, message.Length)];
             RenderMessages();
-            _ = ObserveInteractionAsync(_client, chatItem, 0, _connectionLifetime?.Token ?? CancellationToken.None);
+            _ = ObserveInteractionAsync(client, chatItem, 0, token);
         }
-        catch (Exception exception) { ShowError(exception.Message); }
-        finally { SendButton.IsEnabled = true; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) { ShowError($"Could not send: {exception.Message}. Retry the same message to reuse its request key."); }
+        finally
+        {
+            _textSending = false;
+            SendButton.IsEnabled = true;
+            if (!_closed && _activeInteraction is null) await RestartWakeWordAsync();
+        }
     }
 
     private async Task ObserveInteractionAsync(AssisterClient client, ChatItem item, long sequence, CancellationToken cancellationToken)
@@ -476,7 +536,7 @@ public partial class MainWindow : Window
                     var root = document.RootElement;
                     var type = root.GetProperty("type").GetString() ?? "";
                     var data = root.TryGetProperty("data", out var payload) ? payload : default;
-                    if (!_messages.Contains(item)) continue;
+                    if (!_messages.Contains(item)) return;
                     item.Timeline.Apply(root);
                     switch (type)
                     {
@@ -543,7 +603,16 @@ public partial class MainWindow : Window
                 await RestartWakeWordAsync();
         }
         catch (OperationCanceledException) { }
-        catch (Exception exception) { Dispatcher.Invoke(() => SetConnection("Reconnecting", "#E4A95C")); _ = exception; }
+        catch (Exception exception)
+        {
+            if (!_closed && !cancellationToken.IsCancellationRequested && _messages.Contains(item))
+            {
+                item.Error = "Live updates stopped. Select Reconnect to reload this conversation.";
+                SetConnection("Updates interrupted", "#E4A95C");
+                ShowError($"{item.Error} {exception.Message}");
+                RenderMessages();
+            }
+        }
     }
 
     private async Task RestoreAudioAsync(AssisterClient client, CancellationToken token)

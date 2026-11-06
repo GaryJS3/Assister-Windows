@@ -46,7 +46,7 @@ internal static class AutoUpdater
         // Public releases never receive chat or publisher credentials.
         var check = await http.GetFromJsonAsync<UpdateCheck>($"api/updates/assister/windows-x64/check?currentVersion={CurrentVersion}", token);
         if (check is not { UpdateAvailable: true, Release: { } release }) return null;
-        if (release.AppId != "assister" || release.Platform != "windows-x64" || !Version.TryParse(release.Version, out var version) || version <= Version.Parse(CurrentVersion) || release.Size is <= 0 or > 536870912 || release.Sha256.Length != 64) throw new InvalidDataException("Invalid Windows release metadata.");
+        if (release.AppId != "assister" || release.Platform != "windows-x64" || !Version.TryParse(release.Version, out var version) || version <= Version.Parse(CurrentVersion) || release.Size is <= 0 or > 536870912 || release.Sha256 is not { Length: 64 } || !release.Sha256.All(Uri.IsHexDigit) || string.IsNullOrWhiteSpace(release.DownloadUrl)) throw new InvalidDataException("Invalid Windows release metadata.");
         var url = new Uri(origin, release.DownloadUrl);
         if (url.Scheme != origin.Scheme || url.Authority != origin.Authority || url.UserInfo.Length != 0) throw new InvalidDataException("Update download must use the configured server origin.");
         var directory = Path.Combine(Root, "Updates", Guid.NewGuid().ToString("N"));

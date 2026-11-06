@@ -15,7 +15,7 @@ Open **Settings** in the app to enter a rich-client server origin and bearer tok
 
 Read [AGENTS.md](AGENTS.md) for contribution guidance and [docs/progress.md](docs/progress.md) for implemented features, parity work, and verification status. Before changing API behavior, consult the [canonical rich-client protocol](https://github.com/GaryJS3/Assister/blob/main/docs/rich-client-protocol.md).
 
-For local development, keep the rich-client token in the ignored root `assister-dev-token.txt`. The Windows publisher and server release route are not implemented yet.
+For local development, keep the rich-client token in the ignored root `assister-dev-token.txt`. Publish releases with `Publish-Windows.ps1` as described below.
 
 ## Automatic Windows updates
 

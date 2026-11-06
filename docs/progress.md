@@ -1,17 +1,19 @@
 # Windows Port Progress
 
-Last reviewed: October 25, 2026.
+Last reviewed: November 6, 2026.
 
 ## Windows Test Device
 
 - Primary tablet: `Tab-Dev` (`10.0.0.197`), running Visual Studio 2026 Remote Debugger.
 - Local deployment credential is saved in the Git-ignored root `tab-dev-credentials.xml` using Windows DPAPI; it is scoped to the current Windows user and workstation.
 - Use it for touch/layout, scaling, orientation, microphone, speaker, and suspend/resume acceptance as corresponding features land. Record results separately from build and automated-test evidence.
-- Remote deployment/debugging has not yet been performed.
+- Prior deployments and automated tablet checks are recorded below. The November 6 audit could not reach the tablet over WinRM; physical acceptance for that release remains pending.
 
 This tracker separates code that exists from platform/server verification. Android behavior is a parity target, not evidence that the Windows app already supports it. Consult the [Android repository](https://github.com/GaryJS3/Assister-Android) for the source behavior and the [canonical rich-client protocol](https://github.com/GaryJS3/Assister/blob/main/docs/rich-client-protocol.md) for wire contracts.
 
 ## Implemented
+
+- [x] November 6 reliability audit: serialized text submission/navigation, preserved edited drafts, in-session idempotent text retry, HTTP replay with transient-failure backoff, paginated historical audio discovery, explicit Reconnect, expired-conversation recovery, token-change conversation reset, offline-close crash fix, and publisher origin/version validation. See [audit findings and remaining work](audit-2026-11-06.md).
 
 - [x] Authenticated Windows device registration using the computer name and `windows` client type. Presence renews every 30 seconds, retries transient failures, and withdraws before replacing a connection or closing the app. Initial registration failure prevents a successful connection indication. No device-action capabilities are advertised. Live server visibility and Tab-Dev lifecycle acceptance remain pending.
 
@@ -33,7 +35,7 @@ This tracker separates code that exists from platform/server verification. Andro
 
 ## Remaining Android Parity
 
-- [ ] Local wake word device acceptance: sherpa-onnx KWS listener and Settings opt-in implemented; see `docs/wake-word.md`. Microphone, tablet, window activation, device disconnect, and shutdown acceptance pending. Detection currently focuses typed chat; voice command capture remains pending.
+- [ ] Local wake word device acceptance: sherpa-onnx KWS listener, Settings opt-in, and voice command capture implemented; see `docs/wake-word.md`. Physical microphone, tablet, window activation, device disconnect, and shutdown acceptance remain pending.
 
 - [ ] Protocol DTOs and pure reducer with sequence deduplication, gap handling, all lifecycle/STT/response/step/context/TTS events, and model-round output separate from answers.
 - [ ] Durable pending request/idempotency recovery, draft persistence, robust reconnect state/backoff, cancellation UI, and process/window lifetime ownership.
@@ -43,10 +45,12 @@ This tracker separates code that exists from platform/server verification. Andro
 - [ ] Response-audio cache, Windows audio focus/device behavior, and physical speaker/lifecycle acceptance. Bounded WAV download/validation, playback controls/autoplay policy, and playback reports are implemented; see verification below.
 - [ ] Device capabilities, targeted requests, permission prompts, durable execution ledger, and structured outcomes. Basic device registration/presence is implemented.
 - [ ] Windows-native update/package flow, accessibility, responsive layout, structured redacted diagnostics, and installer/release guidance.
-- [ ] Windows build publisher that reads the ignored root upload token and uploads a signed package to a server-supported Windows release route; client update checks and install flow.
-- [ ] Add automated .NET tests for reducer, protocol transport, recovery, settings, and UI behavior.
+- [ ] Package signing. The Windows publisher, server release route, client update checks and install flow are implemented and have published releases; packages remain unsigned.
+- [x] Focused C# executable checks for timeline state, protocol transport/recovery, settings, submission, audio, workers and WPF presentation. These do not replace live service and physical device acceptance.
 
 ## Verification Evidence
+
+- November 6 audit: Debug build passed; existing IL3000 single-file detection warning remains on rebuild. AuditCheck, ConversationCheck, FollowUpCheck, PlaybackCheck, PresentationCheck, RegistrationCheck, SettingsCheck, TimelineCheck, ToneCheck, UpdateCheck, VoiceCheck, WorkerSessionCheck, and WakeWordCheck passed. WakeWordCheck requires the installed official model directory; both fixture inference and `--setup` reuse/checksum checks passed after correcting an initial invocation without required arguments. AuditCheck uses isolated settings and local HTTP/WebSocket fixtures to exercise 503 recovery, pagination, duplicate suppression, socket interruption, 401 handling, cancellation, delayed sends, draft preservation, request-key reuse, and completed-history retry. It also exposed and verified the offline-close crash fix. UI renders at 1280x820 and 900x1000 were inspected. Publisher rejects public HTTP and invalid versions before credentials/build/upload. NuGet's vulnerability audit including transitive packages reported none with current sources. `git diff --check` passed. Tab-Dev WinRM connection failed; no tablet restart, installation, physical touch, microphone, speaker, or suspend/resume acceptance is claimed. Release evidence will be recorded after upload.
 
 - Registration release `2026.10.25.1` (October 25, 2026): implementation commit `14ad488` pushed to `origin/master`; `.\Publish-Windows.ps1 -Version 2026.10.25.1` published and verified the public 199,178,168-byte Windows x64 package. SHA-256: `2B7D5635503A5DF9F29F7134CCC1583ED4E4498C66E2A9CA3340577574C58DFC`; executable file version is `2026.10.25.1`. Live update metadata offers this release to `2026.10.8.4` and reports no update for `2026.10.25.1`. Existing updater IL3000 warning remains. No tablet installation/restart was triggered and live device registration remains unverified.
 

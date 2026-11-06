@@ -40,6 +40,7 @@ internal sealed class AssisterClient : IDisposable
     {
         if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)) return true;
         if (!System.Net.IPAddress.TryParse(host, out var address)) return false;
+        if (System.Net.IPAddress.IsLoopback(address)) return true;
         var bytes = address.GetAddressBytes();
         return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork &&
             (bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31 || bytes[0] == 192 && bytes[1] == 168);
@@ -138,8 +139,12 @@ internal sealed class AssisterClient : IDisposable
 
     public async Task<bool> HasAudioAsync(Guid interactionId, CancellationToken cancellationToken)
     {
-        using var events = await _http.GetFromJsonAsync<JsonDocument>($"api/client/interactions/{interactionId}/events?afterSequence=0", Json, cancellationToken);
-        return events?.RootElement.ValueKind == JsonValueKind.Array && events.RootElement.EnumerateArray().Any(item => item.TryGetProperty("type", out var type) && type.GetString() == "tts.audio");
+        var hasAudio = false;
+        await RestoreTimelineAsync(interactionId, item =>
+        {
+            if (item.TryGetProperty("type", out var type) && type.GetString() == "tts.audio") hasAudio = true;
+        }, cancellationToken);
+        return hasAudio;
     }
 
     public async Task RestoreTimelineAsync(Guid interactionId, Action<JsonElement> applyEvent, CancellationToken cancellationToken)
@@ -185,8 +190,20 @@ internal sealed class AssisterClient : IDisposable
         var cursor = afterSequence;
         while (!cancellationToken.IsCancellationRequested)
         {
-            using (var check = await _http.GetAsync($"api/client/interactions/{interactionId}/events?afterSequence={cursor}", cancellationToken))
-                check.EnsureSuccessStatusCode();
+            // Recover committed events over HTTP before subscribing. A temporary outage must not
+            // terminate observation, and a completed replay must not depend on a working socket.
+            using var history = await GetEventsWithRetryAsync(interactionId, cursor, cancellationToken);
+            foreach (var entry in history.RootElement.EnumerateArray())
+            {
+                var next = entry.GetProperty("sequence").GetInt64();
+                if (next <= cursor) continue;
+                if (next != cursor + 1) throw new InvalidDataException("Event history is incomplete. Reconnect to reload this conversation.");
+                cursor = next;
+                var terminal = entry.GetProperty("type").GetString() is "interaction.completed" or "interaction.failed" or "interaction.cancelled";
+                yield return JsonDocument.Parse(entry.GetRawText());
+                if (terminal) yield break;
+            }
+            if (history.RootElement.GetArrayLength() >= 256) continue;
 
             var address = new Uri(_http.BaseAddress!, $"api/client/interactions/{interactionId}/stream?afterSequence={cursor}");
             var socketAddress = new UriBuilder(address) { Scheme = address.Scheme == "https" ? "wss" : "ws" }.Uri;
@@ -222,6 +239,25 @@ internal sealed class AssisterClient : IDisposable
                 if (terminal) yield break;
             }
             await Task.Delay(500, cancellationToken);
+        }
+    }
+
+    private async Task<JsonDocument> GetEventsWithRetryAsync(Guid interactionId, long cursor, CancellationToken token)
+    {
+        var delay = 500;
+        while (true)
+        {
+            try
+            {
+                return await _http.GetFromJsonAsync<JsonDocument>($"api/client/interactions/{interactionId}/events?afterSequence={cursor}", Json, token)
+                    ?? throw new InvalidDataException("The server returned empty event history.");
+            }
+            catch (HttpRequestException exception) when (exception.StatusCode is null ||
+                exception.StatusCode is System.Net.HttpStatusCode.RequestTimeout or System.Net.HttpStatusCode.TooManyRequests ||
+                (int)exception.StatusCode >= 500) { }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+            await Task.Delay(delay, token);
+            delay = Math.Min(delay * 2, 10000);
         }
     }
 

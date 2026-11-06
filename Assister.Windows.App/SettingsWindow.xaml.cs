@@ -6,6 +6,7 @@ namespace Assister.Windows.App;
 public partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
+    private readonly string _originalToken;
     private CancellationTokenSource? _setupLifetime;
     private bool _closed;
     private readonly Func<CancellationToken, Task<string>> _checkForUpdates;
@@ -26,7 +27,8 @@ public partial class SettingsWindow : Window
         WakeWordKeywordsInput.Text = string.IsNullOrWhiteSpace(settings.WakeWordKeywordsFile) ? WakeWordSetup.KeywordsFile : settings.WakeWordKeywordsFile;
         WakeWordSetupStatus.Text = WakeWordSetup.IsInstalled() ? "Engine installed · ready to enable" : "One-time download from sherpa-onnx. No scripts or file selection needed.";
         Closed += (_, _) => { _closed = true; _setupLifetime?.Cancel(); _updateCheckLifetime?.Cancel(); };
-        TokenInput.Password = CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken() ?? string.Empty;
+        _originalToken = CredentialStore.Read() ?? CredentialStore.ReadDevelopmentToken() ?? string.Empty;
+        TokenInput.Password = _originalToken;
     }
 
     private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
@@ -104,7 +106,8 @@ public partial class SettingsWindow : Window
             using var client = new AssisterClient(EndpointInput.Text, token);
             CredentialStore.Save(token);
             var endpoint = EndpointInput.Text.Trim().TrimEnd('/') + "/";
-            if (!string.Equals(_settings.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_settings.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(_originalToken, token, StringComparison.Ordinal))
             {
                 _settings.ConversationId = null;
                 _settings.LastConversationActivityUtc = null;
@@ -123,6 +126,7 @@ public partial class SettingsWindow : Window
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.IO.IOException or UnauthorizedAccessException)
         {
             ErrorLabel.Text = exception.Message;
+            ErrorLabel.BringIntoView();
         }
     }
 }
